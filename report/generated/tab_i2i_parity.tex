@@ -1,0 +1,18 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{4.6cm} p{2.5cm} Y}
+\toprule
+\rowcolor{Mist}
+配置 & 图像 token（ViT / VAE） & I2I 中位数（min--max，秒） \\
+\midrule
+\textcolor{Teal}{M* CFG 并行（compile 开）} & 1369 / 1024 & \textbf{16.79\,\textcolor{Muted}{(16.75--16.81)}} \\
+\textcolor{Teal}{M* CFG 并行（compile 关）} & 1369 / 1024 & 18.25\,\textcolor{Muted}{(18.23--18.26)} \\
+\textcolor{Teal}{M* TP2（compile 开）} & 1369 / 1024 & 21.21\,\textcolor{Muted}{(21.20--21.21)} \\
+\textcolor{Teal}{M* CFG 并行，KV 前缀缓存关} & 1369 / 1024 & 16.82\,\textcolor{Muted}{(16.80--16.83)} \\
+\textcolor{Orange}{vLLM-Omni 单 stage TP2（512$^2$ 原生输入）} & 1369 / 1024 & \textbf{28.08\,\textcolor{Muted}{(28.07--28.08)}} \\
+\midrule
+\multicolumn{3}{l}{\textcolor{Muted}{早期指令（“Add a small cat sitting beside the bagel on the plate.”）的运行}} \\
+\textcolor{Muted}{M* CFG 并行，\code{vllm}（4900 patch）} & 4900 / 1024 & 18.98\,\textcolor{Muted}{(18.96--19.00)} \\
+\textcolor{Muted}{M* CFG 并行，\code{default}（输出未加入猫）} & 1369 / 1024 & 16.83\,\textcolor{Muted}{(16.81--16.83)} \\
+\textcolor{Muted}{vLLM-Omni 单 stage TP2（512$^2$ 原生）} & 1369 / 1024 & 28.07\,\textcolor{Muted}{(28.06--28.07)} \\
+\textcolor{Muted}{vLLM-Omni 单 stage TP2（输入放大到 980$^2$）} & 4900 / 3721 & 31.24\,\textcolor{Muted}{(31.24--31.25)} \\
+\bottomrule
+\end{tabularx}

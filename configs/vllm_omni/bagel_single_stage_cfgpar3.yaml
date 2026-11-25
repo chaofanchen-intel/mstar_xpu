@@ -1,0 +1,18 @@
+# vLLM-Omni BAGEL single-stage, CFG-parallel over 3 XPUs (cfg_parallel_size 3: main, text-CFG, image-CFG branches).
+# Eager (BAGEL has no denoise-graph support in vllm-omni). @GPUS@ is replaced by scripts/serve_omni.sh.
+pipeline: bagel_single_stage
+async_chunk: false
+
+stages:
+  - stage_id: 0
+    max_num_batched_tokens: 32768
+    max_num_seqs: 1
+    max_model_len: 8192
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    tensor_parallel_size: 1
+    cfg_parallel_size: 3
+    devices: "@GPUS@"
+    default_sampling_params:
+      seed: 52

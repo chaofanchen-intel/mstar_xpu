@@ -1,0 +1,10 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2I 512²·50 步 \\
+\midrule
+SharedMemory（默认） & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{17.962\,\textcolor{Muted}{(17.823--17.979)}}}\,$\star$ & \textcolor{Muted}{30.74\textsuperscript{†}} \\
+Mooncake TransferEngine（TCP） & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{17.983\,\textcolor{Muted}{(17.976--17.994)}}}\,$\star$ & \textcolor{Muted}{29.92\textsuperscript{†}} \\
+NIXL（UCX） & \textcolor{Orange}{Omni} & \textcolor{Red}{失败\textsuperscript{‡}} & \textcolor{Red}{失败\textsuperscript{‡}} \\
+\bottomrule
+\end{tabularx}

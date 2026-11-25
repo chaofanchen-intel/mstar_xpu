@@ -1,0 +1,14 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{4.6cm} Y Y Y Y}
+\toprule
+\rowcolor{Mist}
+M* 配置 & 1 token，4900 patch（早期） & 1 token，1369 patch（本次） & 64 token，4900 patch（早期） & 64 token，1369 patch（本次） \\
+\midrule
+CFG 并行（compile 开） & \textcolor{Muted}{0.193} & \textbf{\textcolor{Teal}{0.085}} & \textcolor{Muted}{2.55} & \textbf{\textcolor{Teal}{2.46}} \\
+CFG 并行（compile 关） & \textcolor{Muted}{0.200} & \textbf{\textcolor{Teal}{0.083}} & \textcolor{Muted}{2.29} & \textbf{\textcolor{Teal}{2.17}} \\
+TP2（compile 开） & \textcolor{Muted}{0.959} & \textbf{\textcolor{Teal}{0.330}} & \textcolor{Muted}{3.76} & \textbf{\textcolor{Teal}{3.16}} \\
+CFG 并行，KV 前缀缓存关 & \textcolor{Muted}{0.826} & \textbf{\textcolor{Teal}{0.293}} & \textcolor{Muted}{3.18} & \textbf{\textcolor{Teal}{2.66}} \\
+\midrule
+\textcolor{Orange}{Omni two-stage（1386 token 提示），缓存关} & -- & \textbf{\textcolor{Orange}{0.193}} & -- & \textbf{\textcolor{Orange}{1.882}} \\
+\textcolor{Orange}{Omni two-stage，Thinker 前缀缓存开} & -- & \textbf{\textcolor{Orange}{0.053}} & -- & \textbf{\textcolor{Orange}{1.744}} \\
+\bottomrule
+\end{tabularx}

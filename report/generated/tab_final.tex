@@ -1,0 +1,17 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2T 1 token & I2T 64 token & I2I 512²·50 步 \\
+\midrule
+M* CFG 并行 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{7.68}}\,$\star$ & 0.085 & 2.46 & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{16.79}}\,$\star$ \\
+M* CFG 并行 · compile 关（诊断）· 缓存开 & \textcolor{Teal}{M*} & 8.48 & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.083}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{2.17}}\,$\star$ & 18.25 \\
+M* TP2 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & 12.96 & 0.330 & 3.16 & 21.21 \\
+M* CFG 并行 · compile 开 · 缓存关 & \textcolor{Teal}{M*} & -- & 0.293 & 2.66 & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{16.82}}\,$\star$ \\
+\midrule
+Omni 单 stage CFG 并行 · 无 compile & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{9.98}}\,$\star$ & -- & -- & -- \\
+Omni 单 stage TP2 · 无 graph & \textcolor{Orange}{Omni} & 17.04 & -- & -- & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{28.08}}\,$\star$ \\
+Omni two-stage · 缓存关 · eager & \textcolor{Orange}{Omni} & 17.99 & 0.193 & 1.88 & \textcolor{Muted}{30.76\textsuperscript{†}} \\
+Omni two-stage · 缓存关 · Thinker graph & \textcolor{Orange}{Omni} & -- & 0.191 & 1.86 & -- \\
+Omni two-stage · 缓存开 · eager & \textcolor{Orange}{Omni} & -- & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.053}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.74}}\,$\star$ & -- \\
+\bottomrule
+\end{tabularx}

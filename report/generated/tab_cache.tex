@@ -1,0 +1,9 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & I2T 1 token & I2T 64 token & I2I 512²·50 步 \\
+\midrule
+Omni two-stage，Thinker 前缀缓存开 & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.053\,\textcolor{Muted}{(0.052--0.053)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.744\,\textcolor{Muted}{(1.743--1.749)}}}\,$\star$ & -- \\
+M* CFG 并行，KV 前缀缓存关 & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.293\,\textcolor{Muted}{(0.292--0.293)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{2.656\,\textcolor{Muted}{(2.647--2.658)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{16.815\,\textcolor{Muted}{(16.801--16.826)}}}\,$\star$ \\
+\bottomrule
+\end{tabularx}

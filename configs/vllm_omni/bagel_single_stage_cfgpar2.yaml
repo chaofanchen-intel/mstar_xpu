@@ -1,0 +1,20 @@
+# vLLM-Omni BAGEL single-stage, CFG-parallel over 2 XPUs (no TP): each rank holds the whole model (~27 GiB),
+# rank 0 runs the main branch and rank 1 the text-CFG branch, results all-gathered every step.
+# BAGEL supports this for 2-branch CFG only (text-to-image); image-CFG (img2img) needs cfg_parallel_size=3.
+# @GPUS@ is replaced with the physical XPU ids by scripts/serve_omni.sh.
+pipeline: bagel_single_stage
+async_chunk: false
+
+stages:
+  - stage_id: 0
+    max_num_batched_tokens: 32768
+    max_num_seqs: 1
+    max_model_len: 8192
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    tensor_parallel_size: 1
+    cfg_parallel_size: 2
+    devices: "@GPUS@"
+    default_sampling_params:
+      seed: 52

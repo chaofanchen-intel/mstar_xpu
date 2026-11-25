@@ -1,0 +1,53 @@
+# Two-stage topology of bagel_two_stage_2gpu.yaml with the Mooncake TransferEngine connector over TCP (CPU-pinned pool).
+# vLLM-Omni BAGEL, two-stage topology on two XPUs:
+#   Stage 0 (Thinker, vLLM AR engine: ViT + LLM prefill/decode)  -> XPU @GPU_A@
+#   Stage 1 (DiT: denoising + VAE)                               -> XPU @GPU_B@
+# KV cache is handed from stage 0 to stage 1 through the stage connector (Mooncake TransferEngine over TCP in this file).
+# Eager execution everywhere, matching M*'s eager XPU config.
+async_chunk: false
+
+stages:
+  - stage_id: 0
+    max_num_batched_tokens: 8192
+    max_num_seqs: 1
+    max_model_len: 6144   # Thinker on one 32 GiB card: ~0.33 GiB KV left (max ~6.2k tokens); I2I prefix is ~5.95k
+    gpu_memory_utilization: 0.98
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    devices: "@GPU_A@"
+    output_connectors:
+      to_stage_1: mooncake_connector
+    default_sampling_params:
+      temperature: 0.4
+      top_p: 0.9
+      top_k: 1
+      max_tokens: 2048
+      seed: 52
+      detokenize: true
+      repetition_penalty: 1.05
+
+  - stage_id: 1
+    max_num_batched_tokens: 8192
+    max_num_seqs: 1
+    max_model_len: 8192
+    gpu_memory_utilization: 0.9
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    devices: "@GPU_B@"
+    input_connectors:
+      from_stage_0: mooncake_connector
+    default_sampling_params:
+      seed: 52
+
+connectors:
+  mooncake_connector:
+    name: MooncakeTransferEngineConnector
+    extra:
+      host: "auto"
+      zmq_port: 50051
+      protocol: "tcp"
+      device_name: ""
+      memory_pool_size: 4294967296
+      memory_pool_device: "cpu"

@@ -1,0 +1,144 @@
+% 各因素对性能的影响
+\setpart{BAGEL 实测 · 各因素的影响}
+
+\begin{frame}[t]{各因素对延迟的影响一览（A $\rightarrow$ B 的变化，负值为更快）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.1cm} p{3.6cm} r r r r Y}
+\toprule
+\rowcolor{Mist}
+因素 & A $\rightarrow$ B & T2I & I2I & I2T 1 & I2T 64 & 备注 \\
+\midrule
+\textcolor{Teal}{M*} 并行拓扑 & TP2 $\rightarrow$ CFG 并行 & \pct{topoMstarTti} & \pct{topoMstarIti} & \pct{topoMstarPre} & \pct{topoMstarDec} & 影响最大 \\
+\textcolor{Orange}{Omni} 并行拓扑 & 单 stage TP2 $\rightarrow$ CFG 并行 & \pct{topoOmniTti} & 不支持 & -- & -- & I2I 需要 3 卡 \\
+\textcolor{Teal}{M*} torch.compile & 关 $\rightarrow$ 开（CFG 并行） & \pct{cmpCfgTti} & \pct{cmpCfgIti} & \pct{cmpCfgPre} & \pct{cmpCfgDec} & 解码变慢 \\
+\textcolor{Orange}{Omni} two-stage connector & SHM $\rightarrow$ Mooncake-TCP & \pct{connMoonTti} & \pct{connMoonIti} & -- & -- & 见下页 \\
+\textcolor{Orange}{Omni} two-stage connector & SHM $\rightarrow$ NIXL & \pct{connNixlTti} & \pct{connNixlIti} & -- & -- & NIXL 无法使用 \\
+\textcolor{Orange}{Omni} Thinker 前缀缓存 & 关 $\rightarrow$ 开 & -- & -- & \pct{cacheOmni1} & \pct{cacheOmni64} & 同图重复提问时命中 \\
+\textcolor{Teal}{M*} KV 前缀缓存 & 关 $\rightarrow$ 开（默认开） & -- & \pct{cacheMstarIti} & \pct{cacheMstar1} & \pct{cacheMstar64} & 同上 \\
+\textcolor{Orange}{Omni} 软件版本 & v0.32 $\rightarrow$ main（单 stage TP2） & \pct{verOmniTti} & \pct{verOmniIti} & -- & -- & 两阶段解码 \pct{verOmni2Dec} \\
+SDPA 修复（OpenCL） & MATH $\rightarrow$ 默认 oneDNN & $\approx$0 & -- & $-$33\%\textsuperscript{§} & -- & 仅 M* 受影响 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{百分比 = B 相对 A 的稳态中位数变化。“--” 表示该组合不适用或无有效数据。\textsuperscript{§}两侧输入相同，仅作 A/B。}
+\takeaway{并行拓扑的影响（$-$17\% 到 $-$74\%）远大于 compile 与缓存（个位数到约 10\%）。两框架的差距主要来自拓扑选择。}
+\end{frame}
+
+\begin{frame}[t]{并行拓扑：CFG 并行与 TP2 有什么区别}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.4cm} Y Y}
+\toprule
+\rowcolor{Mist}
+ & TP2（张量并行） & CFG 并行 \\
+\midrule
+切分方式 & 每一层的权重矩阵切成两半，两张卡各算一半 & 权重不切分。两路 CFG 分支各占一张卡 \\
+每张卡的权重 & 约一半（约 13--14 GiB） & 完整一份（约 27 GiB） \\
+每张卡的计算 & 每路分支的一半 & 一整路分支 \\
+卡间同步 & 每一层算完都要 all-reduce，两张卡交换部分结果并相加 & 每个去噪步交换一次引导结果 \\
+文生图的同步次数 & 约 5000 次（50 步，每步约 100 次） & 约 50 次（每步 1 次） \\
+图像编辑（3 路分支） & 两张卡各算一半的全部分支，同步次数更多 & 主分支在卡 0，两路引导分支串行在卡 1，卡 1 是关键路径 \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{2pt}
+  \item \textbf{一个去噪步的过程}。TP2：两张卡同时算第 1 层的一半，all-reduce；算第 2 层的一半，all-reduce；……，每步约 100 次。CFG 并行：卡 1 完整算条件分支，同时卡 2 完整算无条件分支；交换一次，合并引导，进入下一步。
+  \item 两种方式在理论上每张卡的计算量相同，区别在于 \textbf{卡间同步的次数与粒度}。TP2 的同步在每层之间，粒度小、次数多；CFG 并行的同步只在每步之间。
+  \item 代价：CFG 并行每张卡都要放一份完整模型，显存占用更高（每卡约 31 GiB，几乎占满）。
+\end{itemize}
+\takeaway{TP2 的代价是每步约 100 次跨卡同步；CFG 并行每步只有 1 次。在本机的 PCIe 上，一次同步约 1.3 ms，所以 TP2 每张图多花约 6.5 s。}
+\end{frame}
+
+\begin{frame}[t]{并行拓扑：数值与通信开销}
+\scriptsize\def\codesize{\relax}
+\begin{minipage}[t]{.52\textwidth}
+\begin{itemize}\scriptsize\setlength\itemsep{2pt}
+  \item \textbf{通信量}：一次文生图（50 步，两路分支）约 \textbf{5000 次} all-reduce（实测计数）。
+  \item \textbf{单次开销}：卡 (1,2) 上一次 7 MB 的 all-reduce 约 \textbf{1.3 ms}（约 5.6 GB/s，经 PCIe）。5000 $\times$ 1.3 ms $\approx$ 6.5 s。
+  \item \textbf{与实测对照}：TP2 比 CFG 并行慢 5.3 s（M*）、7.1 s（vLLM-Omni），与通信估算基本吻合。两框架各自的计算量相同，差距基本来自通信。
+  \item \textbf{I2T}：CFG 并行下也快很多（M* 1 token 从 \raw{final/mstar-tp2/i2t1} s 降到 \raw{final/mstar-cfgpar/i2t1} s）。TP2 的预填充与解码每层都有 all-reduce。
+\end{itemize}
+\end{minipage}\hfill
+\begin{minipage}[t]{.45\textwidth}
+\renewcommand{\arraystretch}{1.15}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\bfseries}p{2.4cm} Y Y}
+\toprule
+\rowcolor{Mist}
+秒 & TP2 & CFG 并行 \\
+\midrule
+\textcolor{Teal}{M*} T2I & \val{final/mstar-tp2/t2i} & \textbf{\val{final/mstar-cfgpar/t2i}} \\
+\textcolor{Teal}{M*} I2I & \val{final/mstar-tp2/i2i} & \textbf{\val{final/mstar-cfgpar/i2i}} \\
+\textcolor{Teal}{M*} I2T 1 token & \val{final/mstar-tp2/i2t1} & \textbf{\val{final/mstar-cfgpar/i2t1}} \\
+\textcolor{Teal}{M*} I2T 64 token & \val{final/mstar-tp2/i2t64} & \textbf{\val{final/mstar-cfgpar/i2t64}} \\
+\textcolor{Orange}{Omni} T2I & \val{final/omni-single-tp2/t2i} & \textbf{\val{final/omni-single-cfgpar2/t2i}} \\
+\bottomrule
+\end{tabularx}
+\end{minipage}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 通信速度取决于卡对。卡 (0,1) 的数据未测，因此在通信更快的卡对上，两种拓扑的相对优劣可能不同，未验证。
+\end{itemize}
+\takeaway{在这对卡上，PCIe all-reduce 是 TP2 的主要开销。使用不需要层内通信的 CFG 并行后，两个框架都快 40\% 以上。}
+\end{frame}
+
+\begin{frame}[t]{torch.compile：在 Intel GPU 上收益有限}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.4cm} r r r r r r r r}
+\toprule
+\rowcolor{Mist}
+M* 配置 & T2I 关 & T2I 开 & I2I 关 & I2I 开 & I2T 64 关 & I2T 64 开 & 首请求 T2I 关 & 首请求 T2I 开 \\
+\midrule
+CFG 并行（秒） & \val{final/mstar-cfgpar-nocompile/t2i} & \textbf{\val{final/mstar-cfgpar/t2i}} & \val{final/mstar-cfgpar-nocompile/i2i} & \textbf{\val{final/mstar-cfgpar/i2i}} & \textbf{\val{final/mstar-cfgpar-nocompile/i2t64}} & \val{final/mstar-cfgpar/i2t64} & \warm{final/mstar-cfgpar-nocompile/t2i} & \warm{final/mstar-cfgpar/t2i} \\
+TP2（秒，早期批次） & \val{v032/mstar-tp2-nocompile/t2i} & \textbf{\val{v032/mstar-tp2/t2i}} & \val{v032/mstar-tp2-nocompile/i2i} & \textbf{\val{v032/mstar-tp2/i2i}} & \textbf{\anyval{v032/mstar-tp2-nocompile/i2t64}}\textsuperscript{§} & \anyval{v032/mstar-tp2/i2t64}\textsuperscript{§} & \warm{v032/mstar-tp2-nocompile/t2i} & \warm{v032/mstar-tp2/t2i} \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{2pt}
+  \item 同一拓扑下，compile 开与关的对比。\textsuperscript{§}早期批次的图生文为缓存默认开的设置，仅作 A/B。compile 在 XPU 上主要做 Inductor / Triton-XPU 的算子融合：扩散加速 \textbf{7--9\%}（CFG 并行：T2I \pct{cmpCfgTti}，I2I \pct{cmpCfgIti}）；小 batch 的解码反而\textbf{变慢}（\pct{cmpCfgDec}，TP2 下更明显）。
+  \item 首请求多出约 6--7 s 的编译时间。M* 没有官方开关，“关”是通过 hook 让 \code{torch.compile} 失效实现的，仅作诊断。
+  \item CUDA 上 compile 的主要收益来自 CUDA graph，减少了内核启动开销。B70 上 GPU 利用率采样的最高值只有 14--22\%，推测 eager 路径受内核启动限制。XPU graph 在两卡上无法用于 BAGEL；三卡结果见第 6 部分。
+\end{itemize}
+\takeaway{Intel GPU 上 compile 只带来个位数百分比的扩散加速，并使解码变慢约 10\%。CUDA 上的大幅提速主要来自 CUDA graph；B70 上两卡无法获得；三卡结果见第 6 部分。}
+\end{frame}
+
+
+\begin{frame}[t]{两阶段 connector：SharedMemory、Mooncake、NIXL}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_conn}
+\vspace{3pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1.5pt}
+  \item 同一 two-stage 拓扑（Thinker 在卡 1，DiT 在卡 2，eager），仅改变两阶段之间 KV 的传输方式。n = 5，括号为 min--max。
+  \item \textbf{SharedMemory 与 Mooncake（TCP）}：文生图相同（\pct{connMoonTti}）。KV 很小，传输不是瓶颈。图像编辑中 Mooncake 快约 0.8 s（\pct{connMoonIti}），KV 约 6 k token。
+  \item \textbf{NIXL（UCX）无法在 B70 上使用}\textsuperscript{‡}。UCX 把 XPU 显存识别为主机内存，显存注册失败。KV 传输重试 3 次后失败，DiT 等待 30 s 超时后继续。因此 T2I 的 48.3 s = 18 s + 30 s，\textbf{这不是传输耗时}。\code{nixl\_connector.py} 按张量所在设备选择内存类型，没有 CPU 暂存选项。
+  \item \textsuperscript{†}two-stage 的 I2I 输出为灰图（main 版本），耗时仅供参考。NIXL 失败时（DiT 未收到 KV），I2I 输出正常，说明灰图与 KV 传输路径有关。原因未查明。
+\end{itemize}
+\memo{对照：NVIDIA RTX 5880 上，Mooncake-TCP 的 I2I（50 步）节省 2.25 s（\textminus 8\%）。B70 上同一设置只节省约 0.8 s（\textminus 3\%），原因未单独测量。}
+\takeaway{在 B70 上，connector 的选择对 I2I 的影响约为 3\%。NIXL 目前无法在 XPU 上使用。Mooncake-TCP 可用，但收益有限。}
+\end{frame}
+
+\begin{frame}[t]{前缀缓存：相同输入命中缓存后，I2T 预填充明显缩短}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.6cm} p{3.2cm} r r r r}
+\toprule
+\rowcolor{Mist}
+框架 & 设置 & I2T 1 token & I2T 64 token & 解码每 token（ms） & 说明 \\
+\midrule
+\textcolor{Teal}{M*}（CFG 并行） & KV 前缀缓存关 & \raw{fact/mstar-cfgpar-nocache/i2t1} & \raw{fact/mstar-cfgpar-nocache/i2t64} & \pct{msTokMoff} & 无缓存命中 \\
+\textcolor{Teal}{M*}（CFG 并行） & KV 前缀缓存开（默认） & \raw{final/mstar-cfgpar/i2t1} & \raw{final/mstar-cfgpar/i2t64} & \pct{msTokM} & 缓存命中 \\
+\textcolor{Orange}{Omni} two-stage & Thinker 缓存关（默认，eager） & \raw{final/omni-two-stage/i2t1} & \raw{final/omni-two-stage/i2t64} & \pct{msTokOg} & 无缓存命中 \\
+\textcolor{Orange}{Omni} two-stage & Thinker 缓存开 & \raw{fact/omni-two-stage-prefixcache/i2t1} & \raw{fact/omni-two-stage-prefixcache/i2t64} & \pct{msTokO} & 缓存命中 \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1.5pt}
+  \item 缓存对 1 token（即预填充）影响最大：M* \pct{cacheMstar1}，vLLM-Omni \pct{cacheOmni1}。对 64 token 只省去预填充部分（M* \pct{cacheMstar64}，vLLM-Omni \pct{cacheOmni64}）。
+  \item \textbf{每个 token 的解码}：vLLM-Omni 约 26.8 ms，M* 约 37.7 ms（compile 关时为 33.1 ms）。vLLM-Omni 的解码快约 29\%，与缓存设置无关。
+  \item 缓存只影响图生文。T2I 没有共享前缀；M* 的 I2I 缓存关、开分别为 \raw{fact/mstar-cfgpar-nocache/i2i} s、\raw{final/mstar-cfgpar/i2i} s，无明显差别。
+  \item 实际服务中，同一张图被连续提问时才会命中缓存。单次请求的延迟应以“缓存关”为准。两个框架的默认设置不同，只比较默认值会把设置差异误认为框架差距。
+\end{itemize}
+\takeaway{缓存关对缓存关、开对开时，vLLM-Omni 的图生文都更快（1 token 快 34--38\%，64 token 快 29\%）。缓存可以把 1 token 延迟降到约三分之一，但只在重复输入时有效。}
+\end{frame}

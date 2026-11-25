@@ -1,0 +1,215 @@
+% 附录：两卡最终矩阵的范围、排除的运行、早期测试、复现
+\setpart{附录}
+
+\begin{frame}[t]{附录 A：两卡最终矩阵的稳态中位数与 min--max（秒，n = 5）}
+\tiny\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.1}\setlength{\tabcolsep}{2.5pt}
+\input{generated/tab_final_range}
+\vspace{3pt}
+\memo{单元格格式：中位数（min--max）。同一配置内的重复测量波动小于 1\%（M* CFG 并行文生图 7.655--7.706 s；vLLM-Omni 单 stage CFG 并行文生图 9.973--9.992 s）。框架间的差距远大于测量波动。原始数据：\code{results/20261122\_best\_cfg/final/<label>/timings.csv}。}
+\takeaway{所有框架间的差距都远大于重复测量的波动（波动小于 1\%）。}
+\end{frame}
+
+\begin{frame}[t]{附录 B：排除的运行与原因（一）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.6cm} Y}
+\toprule
+\rowcolor{Mist}
+运行 & 现象与处理 \\
+\midrule
+vLLM-Omni two-stage，Thinker 显存利用率 0.90 / 0.95 & 单卡 KV 空间为零或为负，无法启动。利用率 0.98 且 \code{max\_model\_len} 为 6144 时，KV 约 0.33 GiB，可以运行 \\
+vLLM-Omni two-stage，\code{max\_num\_batched\_tokens} = 6144 & 曾怀疑分块导致 I2I 灰图。恢复为 8192 后仍为灰图，排除该原因 \\
+vLLM-Omni two-stage，手写 \code{<|image\_pad|>} 提示词 & Thinker 将图像描述为披萨，描述与输入不符。改用服务端 chat 模板后描述正确。该批数据不纳入 \\
+vLLM-Omni two-stage I2I（main） & 输出纯灰图（像素极差约 39）。SharedMemory、Mooncake 均为灰图；NIXL 传输失败时输出正常。v0.32.0 输出正常，判断为 main 版本的回归。耗时仅供参考 \\
+vLLM-Omni two-stage + NIXL（UCX） & UCX 无法注册 XPU 显存，KV 传输重试 3 次后失败，DiT 等待 30 s 超时后继续。T2I 的 48.3 s、I2I 的 121.6 s 为失败路径耗时，不代表传输速度 \\
+\bottomrule
+\end{tabularx}
+\takeaway{输出内容不正确（灰图、描述错误）的运行，其耗时不进入性能对比。耗时只在明确标注时作参考。}
+\end{frame}
+
+\begin{frame}[t]{附录 B：排除的运行与原因（二）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.6cm} Y}
+\toprule
+\rowcolor{Mist}
+运行 & 现象与处理 \\
+\midrule
+M* 图生文使用 \code{image\_preprocess:"vllm"}（早期批次） & 4900 patch，vLLM-Omni main 为 1386 token，输入不等量。已用默认预处理重测；早期数据以 \textsuperscript{§} 标注 \\
+vLLM-Omni 单 stage 图生文 & 额外进行了 VAE 编码，描述与输入图不符，且不支持 \code{ignore\_eos}。不作为图生文结果 \\
+M* 图像编辑默认预处理，指令“Add a small cat ...”（早期） & 编辑未生效，输出与输入几乎相同（未加入猫）；改用可颂指令后生效。早期运行仅作记录 \\
+vLLM-Omni 图像编辑输入放大到 980$^2$ & ViT 4900 patch 与 M* 一致，但 VAE 变为 3721 latent（976$^2$），与 M* 的 1024 不等，不用于比较 \\
+两卡 M* TP2 + XPU graph；两卡 M* CFG 并行 + XPU graph & 前者捕获失败并回退 eager；后者显存不足，无法启动 \\
+vLLM 0.34 安装 & \code{vllm-xpu-kernels 0.1.17} 不在默认索引中，需要额外的 index（\code{install\_omni\_env.sh} 已处理） \\
+\bottomrule
+\end{tabularx}
+\takeaway{输出内容不正确（灰图、描述错误）的运行，其耗时不进入性能对比。耗时只在明确标注时作参考。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：早期测试与本次的测量差异}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.1}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.0cm} p{4.2cm} Y}
+\toprule
+\rowcolor{Mist}
+项目 & 早期测试 & 本次 \\
+\midrule
+vLLM-Omni 的图像 token 数 & v0.32 固定为 4900 patch（I2T、I2I 均如此） & main 按输入尺寸计算，512$^2$ 为 1369 patch \\
+M* 的图像预处理 & I2T、I2I 均用 \code{vllm}（4900 patch） & I2T 改用默认预处理（1369 patch）；I2T、I2I 均改用默认预处理（1369 patch）；I2I 指令改为 M* 能跟随的指令（第 4 部分） \\
+前缀缓存 & M* 开（默认），Omni 关（默认） & 两框架分别报告缓存关、开 \\
+workaround & 强制 MATH SDPA，关闭 \code{torch.compile}，数字非默认配置 & 去掉 workaround；关闭 compile 只作诊断 \\
+输出尺寸 & M* 的 I2I 输出取输入图尺寸（512$\times$464） & 统一为 512$\times$512，客户端校验 \\
+vLLM-Omni 单 stage I2T & 描述与输入图不符，且做了多余的 VAE 编码 & 改用 two-stage 的 Thinker，描述正确，64 token 精确 \\
+输出检查 & 只检查 PNG 文件头 & 检查图像内容与 caption 文本 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{早期 T2I 的 CFG 设置、512$^2$、50 步、warmup 与稳态分开、串行计时，本次沿用。}
+\takeaway{早期的 I2T 对比在缓存设置上不对等，I2I 在图像 token 数上不对等。I2T 与 I2I 本次均已等量，输出正确。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：M* 默认 SDPA 的 OpenCL 报错（不影响性能）}
+\scriptsize\def\codesize{\relax}
+\begin{minipage}[t]{.47\textwidth}
+\textbf{现象}：M* 默认 worker 的 SDPA 报 \code{OpenCL device not found}，随后 \code{could not create a primitive}。\\[3pt]
+\textbf{原因}：用 micromamba 安装 FFmpeg 时带入了 conda 的 \code{libOpenCL.so.1}，\code{.bashrc} 把 \code{ffmpeg/lib} 加入了 \code{LD\_LIBRARY\_PATH}。它遮蔽了系统的 OpenCL ICD loader，而该 loader 只读取一个空的 vendors 目录，因此 \code{clinfo} 看到 0 个平台。系统的 \code{intel-opencl-icd}、L0 driver 与 IGC 均正常。\\[3pt]
+\textbf{修复（已验证，无需安装额外组件）}：
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+\item \code{export OCL\_ICD\_VENDORS=/etc/OpenCL/vendors}（已写入 \code{scripts/env.sh}）
+\item 或移除 \code{ffmpeg/lib/libOpenCL.so*}，或从 \code{LD\_LIBRARY\_PATH} 中去掉 ffmpeg 目录
+\end{itemize}
+\textbf{最小复现}：\code{scripts/diagnostics/ocl\_sdpa\_smoke.py}。修复前 ViT 与 VAE 形状的 SDPA 均失败，修复后全部通过。
+\end{minipage}\hfill
+\begin{minipage}[t]{.5\textwidth}
+\textbf{对性能的影响（卡 1+2，早期测试批次，中位数秒）}\\[2pt]
+\renewcommand{\arraystretch}{1.1}\setlength{\tabcolsep}{2.5pt}
+\begin{tabularx}{\linewidth}{>{\bfseries}p{3.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & T2I & I2T 1 token \\
+\midrule
+M* 强制 MATH SDPA & \val{v032/diag-mstar-mathsdpa/t2i} & \anyval{v032/diag-mstar-mathsdpa/i2t1}\textsuperscript{§} \\
+M* 默认 SDPA（已修复） & \val{v032/mstar-tp2/t2i} & \textbf{\anyval{v032/mstar-tp2/i2t1}}\textsuperscript{§} \\
+vLLM-Omni 强制 MATH SDPA & \val{v032/diag-omni-single-mathsdpa/t2i} & -- \\
+vLLM-Omni 不修复（可运行） & \val{v032/diag-omni-single-no-ocl-fix/t2i} & -- \\
+vLLM-Omni 修复后 & \val{v032/omni-single-tp2/t2i} & -- \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+{\color{Muted}\scriptsize 带 ViT 的路径上，修复后的默认 SDPA 比 MATH 快约 1.5$\times$；T2I 与 SDPA 后端无关。\textsuperscript{§}两行 M* 的 I2T 均为 M* 默认缓存开，只用于 A/B 比较。vLLM-Omni 不经过受影响的 oneDNN 路径，不修复也能运行，因此该问题只影响 M* 的默认配置。}
+\end{minipage}
+\takeaway{OpenCL 报错的原因是 conda 的 FFmpeg 自带的 libOpenCL 遮蔽了系统 ICD，设置 \code{OCL\_ICD\_VENDORS} 即可解决。修复本身没有性能代价，与强制 MATH 相比，ViT 路径快约 1.5$\times$。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：候选配置：两卡上每个框架的摆法}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.4cm} p{1.0cm} p{3.9cm} Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & 拓扑 & 说明 \\
+\midrule
+CFG 并行 & \textcolor{Teal}{M*} & LLM 为 TP1，两卡各一份：rank 0 算主分支，rank 1 算引导分支 & \textbf{无 TP 通信}；每卡约 31--32 GiB，显存几乎占满 \\
+TP2 & \textcolor{Teal}{M*} & LLM 为 TP2（卡 1、2），ViT 与 VAE 与 rank 0 同卡 & 官方 \code{bagel\_xpu\_tp2} 的两卡版本；每层 all-reduce \\
+compile 关 & \textcolor{Teal}{M*} & 同 CFG 并行 & 通过 hook 让 \code{torch.compile} 失效。非官方设置，仅用于诊断 \\
++ XPU graph & \textcolor{Teal}{M*} & 两卡 TP2 / CFG 并行；三卡 TP2 & 两卡 TP2 捕获失败，回退 eager；两卡 CFG 并行显存不足。三卡 TP2 捕获成功（需补丁） \\
+\midrule
+单 stage，CFG 并行 & \textcolor{Orange}{Omni} & 整个模型放在 DiT stage，\code{cfg\_parallel\_size: 2} & BAGEL 只有 2 路 CFG 分支（T2I）；I2I 需要 3 路，即 3 张卡 \\
+单 stage，TP2 & \textcolor{Orange}{Omni} & 整个模型做 TP2 & 两卡下 I2I 的唯一可选方案 \\
+two-stage & \textcolor{Orange}{Omni} & Thinker（AR）在卡 1，DiT 在卡 2，KV 经 connector 传输 & I2T 的有效路径。Thinker 单卡 KV 空间小（\code{max\_model\_len} 为 6144） \\
+two-stage + Thinker graph & \textcolor{Orange}{Omni} & 同上，Thinker 启用 graph & 捕获成功，收益约 1\% \\
+\bottomrule
+\end{tabularx}
+\takeaway{两个框架在两张卡上各有 2--4 种摆法。拓扑决定通信量，也决定某些 case 能否运行。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：候选配置筛选（3 次稳态，T2I 与 64 token）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_screen}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 中位数（min--max）。$\star$ = 本轮同框架最佳。\textsuperscript{§}本轮 M* 的图生文使用了 4900 patch（与 vLLM-Omni main 不等量），已由等量数据取代。
+  \item \textbf{M* TP2 + graph}：捕获失败（\code{Graph nodes cannot depend on events from outside the graph}，LLM 前向含 oneCCL 通信），回退 eager，数字与 TP2 相同。\textbf{M* CFG 并行 + graph}：捕获时显存耗尽，25 分钟内无法启动。
+  \item vLLM-Omni two-stage 的 T2I 慢于单 stage：DiT 阶段需要等待 Thinker 经 connector 送来 KV。
+\end{itemize}
+\takeaway{筛选决定了最终矩阵：M* 取 CFG 并行；vLLM-Omni 文生图取单 stage CFG 并行，图像编辑取单 stage TP2，图生文取 two-stage。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：早期结果：两框架均为 TP2，vLLM-Omni v0.32.0}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_v032}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item \textsuperscript{§}M* 的图生文数字为缓存默认开的设置，vLLM-Omni 为缓存默认关，两边不等（图像 token 数相同）。仅供参考。
+  \item 这一批两个框架都用 TP2（M* 为默认配置，vLLM-Omni 为单 stage）。T2I 上 M* 快约 27\%。改用 CFG 并行后两边都快 40\% 以上，差距缩小为 23\%。
+  \item vLLM-Omni 单 stage 的图生文描述不正确，不列。vLLM-Omni two-stage 在 v0.32.0 的 I2I 输出正常（40.1 s），在 main 上为灰图。
+  \item 本批 vLLM-Omni 为 v0.32.0 + vLLM 0.32，与最终矩阵（main + vLLM 0.34）版本不同，不直接比较。版本的影响见因素部分。
+\end{itemize}
+\takeaway{早期结果只反映 TP2 这一种拓扑，已由最终矩阵取代，保留作为完整记录。}
+\end{frame}
+
+\begin{frame}[t]{附录 C：早期图生文结果为什么偏向 M*}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.2cm} Y Y}
+\toprule
+\rowcolor{Mist}
+项目 & 早期测试（vLLM-Omni v0.32.0） & 本次（vLLM-Omni main） \\
+\midrule
+图像 token & M*：4900 patch（\code{vllm}）；vLLM-Omni：固定 4900 & M*：1369 patch（默认）；vLLM-Omni：按尺寸计算，1369 \\
+前缀缓存 & M*：开（默认）；vLLM-Omni：关（默认） & 缓存关、开分别比较 \\
+1 token 延迟，早期 & M* TP2：\anyval{v032/mstar-tp2/i2t1}\textsuperscript{§} s；vLLM-Omni two-stage：\raw{v032/omni-two-stage-2gpu/i2t1} s & -- \\
+1 token 延迟，本次 & M* CFG 并行：缓存关 \raw{fact/mstar-cfgpar-nocache/i2t1} s，缓存开 \raw{final/mstar-cfgpar/i2t1} s & vLLM-Omni two-stage：缓存关 \raw{final/omni-two-stage/i2t1} s，缓存开 \raw{fact/omni-two-stage-prefixcache/i2t1} s \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{2pt}
+  \item 早期 M* 的 1 token 延迟更低，原因是设置不一致：M* 的缓存默认开，同一请求重复发送时预填充命中缓存；vLLM-Omni（v0.32）默认关，每次都要重算。两边的图像 token 数相同（都是 4900），因此差异来自缓存。
+  \item 切换到 main 后，vLLM-Omni 的图像 token 由 4900 降为 1369（源码确认）。1 token 延迟从 1.52 s 降到 0.19 s；token 数在其中的贡献是推断，未在 v0.32 上用 1369 token 单独测量。
+  \item 早期的 M* 为 TP2、vLLM-Omni 为 two-stage，拓扑也不同。本次的 M* 为 CFG 并行。
+\end{itemize}
+\takeaway{早期 M* 的图生文优势来自缓存设置不一致。设置对齐后，图生文由 vLLM-Omni 更快。}
+\end{frame}
+
+\begin{frame}[t,fragile]{附录 D：复现命令与数据目录}
+\scriptsize\def\codesize{\relax}
+\begin{minipage}[t]{.57\textwidth}
+\textbf{运行一个配置}（自动选择空闲卡；卡数不足时不运行）
+\begin{Verbatim}[fontsize=\tiny]
+cd ~/workspaces/mstar_xpu
+scripts/run_one.sh results/<run> mstar-cfgpar mstar \
+  configs/mstar/bagel_cfgpar_2gpu.yaml 2 \
+  t2i,i2t_1tok,i2t_64tok,i2i
+scripts/run_one.sh results/<run> omni-single-cfgpar2 omni \
+  configs/vllm_omni/bagel_single_stage_cfgpar2.yaml 2 t2i
+scripts/run_one.sh results/<run> omni-two-stage omni \
+  configs/vllm_omni/bagel_two_stage_2gpu.yaml 2 \
+  i2t_1tok,i2t_64tok --omni-ignore-eos \
+  --omni-prompt-style chat
+\end{Verbatim}
+\textbf{表格与报告}
+\begin{Verbatim}[fontsize=\tiny]
+scripts/make_tex_tables.py   # 生成报告中的表格与数值
+report/build.sh              # 生成表格并编译报告
+\end{Verbatim}
+\end{minipage}\hfill
+\begin{minipage}[t]{.4\textwidth}
+\textbf{数据目录}
+\begin{itemize}\tiny\setlength\itemsep{0pt}
+\item \code{results/20261122\_best\_cfg/}：候选配置与最终矩阵
+\item \code{results/20261122\_rerun/}：vLLM-Omni v0.32.0，默认配置
+\item \code{results/20261122\_factors/}：connector 与前缀缓存
+\item \code{results/20261122\_i2t\_parity/}：M* 图生文输入对齐
+\item \code{results/archive/20261118\_initial/}：早期测试
+\end{itemize}
+\end{minipage}\par
+\vspace{3pt}
+\memo{失败与被排除的运行保留在 results/ 下的 \texttt{\_failed\_*}、\texttt{\_invalid\_*}、\texttt{\_explore\_*} 目录。每个运行目录包含 timings.csv、manifest.json、样例输出、服务日志、GPU 时间线与生效配置。配置文件位于 configs/mstar 与 configs/vllm\_omni。}
+\takeaway{复现时只需两张空闲卡。3 卡布局与卡对 (0,1) 尚未测量。}
+\end{frame}

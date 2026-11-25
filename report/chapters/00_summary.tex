@@ -1,0 +1,64 @@
+% 总览：结论与各自最优配置的结果（每个数字都标出配置）
+\setpart{总览}
+
+\begin{frame}[t]{结论：图像生成 M* 更快，图生文 vLLM-Omni 更快}
+\small
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \kw{测试内容}：卡 1、2 上的 BAGEL-7B-MoT，各框架取最优配置，等工作量比较端到端延迟。
+  \item \kw{接入工作量}（第 1、2 部分）：M* 约 8 个文件、5.7 千行；vLLM-Omni 约 20 个文件、8.5 千行。
+  \item \kw{并行拓扑}：TP2 每次文生图约 5000 次跨卡 all-reduce；改用 CFG 并行后两框架文生图均快约 41\%。
+  \item \kw{compile 与 graph}：compile 使扩散快 7--9\%、解码慢约 13\%。graph 只作用于图生文解码：三卡 TP2 下 64 token 快约 50\%，扩散步不受影响。
+  \item \kw{前缀缓存}：M* 默认开，vLLM-Omni 默认关，因此缓存关、开分别比较。
+\end{itemize}
+\takeaway{文生图 M* 快 \pct{mFastT2I}，图像编辑 M* 快 \pct{mFastI2I}（各自最优配置）。图生文 vLLM-Omni 更快：缓存关时 1 token 快 \pct{oFastI1off}、64 token 快 \pct{oFastI64off}；缓存开时分别快 \pct{oFastI1on}、\pct{oFastI64on}。绝对值只适用于卡 1+2 与本次软件版本。}
+\end{frame}
+
+\begin{frame}[t]{各自最优配置的结果（稳态中位数，秒）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.2}\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.4cm} Y Y Y Y r}
+\toprule
+\rowcolor{Mist}
+测试项 & \textcolor{Teal}{M*} 结果 & \textcolor{Teal}{M*} 配置 & \textcolor{Orange}{vLLM-Omni} 结果 & \textcolor{Orange}{vLLM-Omni} 配置 & Omni 相对 M* \\
+\midrule
+文生图 512$^2$，50 步 & \textbf{\val{final/mstar-cfgpar/t2i}} & CFG 并行，卡 1、2；compile 开；缓存开；无 graph & \val{final/omni-single-cfgpar2/t2i} & 单 stage CFG 并行，卡 1、2；无 compile & \pct{sumT2I} \\
+图像编辑 512$^2$，50 步 & \textbf{\val{final/mstar-cfgpar/i2i}} & CFG 并行，卡 1、2；compile 开；无 graph & \val{final/omni-single-tp2/i2i} & 单 stage TP2，卡 1、2 & \pct{sumI2I} \\
+图生文 1 token，缓存关 & \raw{fact/mstar-cfgpar-nocache/i2t1} & CFG 并行，卡 1、2；compile 开；缓存关 & \raw{final/omni-two-stage/i2t1} & two-stage，Thinker 卡 1、DiT 卡 2；缓存关；eager & \pct{sumI1off} \\
+图生文 1 token，缓存开 & \raw{final/mstar-cfgpar/i2t1} & CFG 并行，卡 1、2；compile 开；缓存开 & \raw{fact/omni-two-stage-prefixcache/i2t1} & two-stage，Thinker 卡 1、DiT 卡 2；缓存开；eager & \pct{sumI1on} \\
+图生文 64 token，缓存关 & \raw{fact/mstar-cfgpar-nocache/i2t64} & 同上（缓存关） & \raw{final/omni-two-stage/i2t64} & 同上（缓存关） & \pct{sumI64off} \\
+图生文 64 token，缓存开 & \raw{final/mstar-cfgpar/i2t64} & 同上（缓存开） & \raw{fact/omni-two-stage-prefixcache/i2t64} & 同上（缓存开） & \pct{sumI64on} \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item “Omni 相对 M*”：正值表示 vLLM-Omni 更慢，负值表示更快。
+  \item 图像编辑两边指令相同。图生文输入规模一致（M* 1369 patch，Omni 1386 token）。
+  \item 配置的完整定义见第 3 部分；三卡的结果单列。
+\end{itemize}
+\end{frame}
+
+\begin{frame}[t]{阅读说明与标记}
+\small
+\begin{itemize}\setlength\itemsep{3pt}
+  \item \kw{第 1 部分：支持范围}：两个框架各支持哪些模型、特性与硬件。
+  \item \kw{第 2 部分：模型接入工作量}：新模型接入需要做什么，两个框架的投入，BAGEL 的实际规模。
+  \item \kw{第 3 部分：BAGEL 实测}：测试环境、配置定义、统一工作量，两卡的全部结果，各因素的影响，三卡的 XPU graph 研究，附录。
+\end{itemize}
+\vspace{2pt}
+\scriptsize\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.0cm} Y}
+\toprule
+\rowcolor{Mist}
+标记 & 含义 \\
+\midrule
+\cellcolor{GoldBg}\textbf{\textcolor{Teal}{7.68}}\,$\star$ & 同一框架内该 case 的最佳配置（1\% 以内并列） \\
+\textcolor{Muted}{30.76\textsuperscript{†}} & 输出图像异常（灰图）：只保留耗时作参考，不参与比较 \\
+\textcolor{Muted}{描述不正确\textsuperscript{†}} & 图生文的描述与输入图不符：不显示耗时 \\
+\textcolor{Red}{失败\textsuperscript{‡}} & 该配置在 XPU 上运行失败（NIXL 传输） \\
+\textcolor{Muted}{2.55\textsuperscript{§}} & 输入或缓存设置与对方不等，仅供参考 \\
+-- & 未测或不支持 \\
+\textcolor{Teal}{M*} / \textcolor{Orange}{Omni} & 框架；全文颜色一致（蓝 = M*，橙 = vLLM-Omni） \\
+\bottomrule
+\end{tabularx}
+\takeaway{延迟 = 单个请求从发出到收到完整响应的端到端秒数。2 次 warmup 后做 5 次稳态测量，取中位数，串行发送；首请求（含 JIT 与编译）单列。这是延迟对比，不是吞吐对比。}
+\end{frame}

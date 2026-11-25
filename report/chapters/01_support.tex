@@ -1,0 +1,197 @@
+% 支持范围：硬件、Intel GPU、模型（2026-11-13 核查，只读源码、文档与上游 PR；2026-11-22 增补 M* 的 Intel 实现、按模型缺口与工作量；仓库内未在 XPU 上运行，B70 结果为用户报告）
+\setpart{支持范围}
+
+\begin{frame}[t]{硬件支持：两个框架的“支持”含义不同}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} Y Y}
+\toprule
+\rowcolor{Mist}
+后端 & \textcolor{Teal}{M*（2c8ffde）} & vLLM-Omni（main a36de509e） \\
+\midrule
+NVIDIA CUDA & 代码支持；仓库 CI 只跑 \code{ubuntu-latest}，没有 GPU & 代码；CI 有 CUDA 任务 \\
+AMD ROCm & 代码，部分（AITER 注意力，\code{attn/dense.py} 等）；文档有 AITER 说明（\code{docs/models.rst}）；没有 ROCm CI & 代码、文档（gfx942）、CI 在 MI300 \\
+Intel XPU & 代码，只有 BAGEL 的 TP2 路径；文档声明；没有 XPU CI & 代码、文档；CI 有 1 卡与 2 卡任务（队列 \code{intel-gpu-omni}），仓库内标记 B60 与 B70，结果不可见 \\
+CPU & CPU 测试套件在 \code{ubuntu-latest} 上用 CPU 版 PyTorch 运行，没有真实模型推理 & 只有 CPU 标记的测试 \\
+Ascend NPU & 没有 NPU 平台 & 代码；CI 在 A2 / A3 / A5 / 310P \\
+\bottomrule
+\end{tabularx}
+\takeaway{“支持”至少分四层：代码、文档、CI、公开的实测结果。两家在最后一层上都看不到 Intel 的公开数据；本报告第 3 部分在本机补上了 BAGEL 的实测。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（一）：代码、文档与 CI}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} Y Y}
+\toprule
+\rowcolor{Mist}
+项目 & \textcolor{Teal}{M*} & vLLM-Omni \\
+\midrule
+平台代码 & \code{XpuPlatform}；XPU 图后端；\code{xpu\_paged} 注意力；RoPE、RMSNorm 融合核；XPU 分布式组 & 独立的 XPU 平台类 \\
+文档声明 & BAGEL：“Intel GPUs with XPU PyTorch for BAGEL”（\code{installation.rst:9--10}） & 模型表的 Intel 列多数打勾；XPU 安装页先写“Validated on Intel Arc B-Series”，后面又写“runtime validation … remains pending” \\
+CI & 没有 XPU 任务；CI 全部在 \code{ubuntu-latest} 上跑 & Buildkite Intel 队列（\code{intel-gpu-omni}），PR 有 1 卡与 2 卡任务；仓库内标记 B60 与 B70；结果不可见 \\
+依赖栈 & \code{Dockerfile.xpu}：torch 2.13.0+xpu，克隆 \code{main}，不是固定 commit；\code{vllm-xpu-kernels==0.1.15.4} 见 \code{pyproject.toml}（约第 167 行） & XPU 文档：保留上游 runtime（\code{Dockerfile.xpu:41} 为 triton 3.9.0+xpu），不换成 triton-xpu；运行验证仍待定 \\
+\bottomrule
+\end{tabularx}
+\takeaway{M* 有 XPU 代码，但没有 XPU 上的 CI；vLLM-Omni 的模型声明最多，有 Intel 队列，但文档前后矛盾。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（二）：证据与上游动态}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} Y Y}
+\toprule
+\rowcolor{Mist}
+项目 & \textcolor{Teal}{M*} & vLLM-Omni \\
+\midrule
+公开证据 & 没有日志或基准。PR \#221 的标题写 “validated on Intel GPU(XPU)”，只是标题 & 文档有 B70 测量数字（\code{denoise\_graph.md:100} 等）；XPU 端到端测试只有 Qwen3-TTS 与 Cosmos3；仓库内无日志 \\
+近期合并 & 上游 pin 之后：\#1124（分布式上下文并行，11-12）改了 \code{attn/xpu.py}、\code{communication.py} 等 & pin 前已有 \#10124、\#9613；之后：\#10278（11-20，HunyuanImage-3 在 XPU 上运行）、\#10780（11-20，1 卡与 2 卡 PR 任务） \\
+开放 PR & 没有标题含 XPU 的开放 PR；\#1413 标题是 Rust 前端，但改了 \code{docker/Dockerfile.xpu}（+4 / -1） & 11 个 XPU / Intel 标题的开放 PR，例如 \#10293（Intel CI 升级）、\#9314（Wan VAE） \\
+\bottomrule
+\end{tabularx}
+\memo{开放 PR 数取 11-13 的上游状态，未重核；合并状态以各 checkout 为准。B70 上 BAGEL 的本机实测见第 3 部分（日志入库于 \code{results/}）。}
+\takeaway{Intel 相关的活跃工作主要在 vLLM-Omni；M* 的 XPU 工作已经合并，目前没有开放的 XPU 功能 PR。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（三）：M* 已有实现（一）：执行路径}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.2cm} Y Y p{3.6cm}}
+\toprule
+\rowcolor{Mist}
+层 & 做了什么 & 怎么实现 & 代码位置 \\
+\midrule
+平台识别 & 进程判断自己跑在 NVIDIA、AMD、Intel 或 CPU 上 & 先查 CUDA，再查 XPU；导入模块时不占用设备 & \code{platforms/\_\_init\_\_.py:40, 68}；\code{interface.py:184} \\
+注意力（分页 KV） & 后端名 \code{xpu\_paged}，是 M* 唯一的 XPU 注意力 & 调用 vllm-xpu-kernels 的变长 FlashAttention；块表来自 KV 资源；图捕获时预分配计划缓冲区 & \code{attn/xpu.py:19, 232}；\code{attn/base.py:352--373} \\
+注意力默认值 & \code{auto} 在 XPU 上也解析为 FlashInfer，代码里没有 XPU 分支 & 其他模型必须在配置里显式写 \code{xpu\_paged}，否则落到 FlashInfer & \code{attn/base.py:65--73} \\
+图捕获 & \code{XPUGraph} 后端 & 与 CUDA 图共用接口，按设备类型选后端；BAGEL 的 XPU 配置默认关闭 & \code{accelerator\_graph\allowbreak\_backend.py:195--213}；\code{configs/bagel\allowbreak\_xpu\_tp2.yaml:3} \\
+RoPE 与 RMSNorm & XPU 版内核 & 注册为 XPU 内核；残差加归一化的融合版只在 CUDA 上，XPU 上是非融合写法 & \code{position/rope.py:77}；\code{rms\_norm/rms\_norm.py:63, 131} \\
+采样 & 批量采样，每个请求用设备端独立随机数 & 调用 vllm-xpu-kernels 的采样核（需 0.1.15 及以上） & \code{sampler/utils.py:1712, 1881} \\
+\bottomrule
+\end{tabularx}
+\memo{以 M* 2c8ffde（2026-11-15，当前 main）为准。XPU 相关的合并提交：\#220（BAGEL TP2）、\#221（CFG TP2 与共享内存 KV 交接）、\#262（XPU 图）、\#347（采样）、\#704（镜像）、\#784（RoPE 表类型拒绝）。}
+\takeaway{M* 的 XPU 实现集中在 BAGEL 这一条路径；其余模型的注意力、Triton 核和图捕获都没有在 XPU 上走过。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（三）：M* 已有实现（二）：通信、配置与交付}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.2cm} Y Y p{3.8cm}}
+\toprule
+\rowcolor{Mist}
+层 & 做了什么 & 怎么实现 & 代码位置 \\
+\midrule
+通信组 & 张量并行组在 XPU 上可用 & 组内同时建 gloo（CPU）与 xpu 两个后端；对称内存全归约只在 CUDA 上启用 & \code{communication.py:586--587}；\code{all\_reduce.py:59} \\
+同机传输 & 共享内存池有 XPU 分支 & 没有拷贝流 & \code{arena.py:204} \\
+BAGEL 配置 & TP2；CFG 并行 TP2 & TP2：LLM 在 rank 1、2；CFG 版本共 7 张卡（0--6） & \code{bagel\_xpu\_tp2.yaml}；\code{bagel\_xpu\_cfg\_tp2.yaml} \\
+依赖与镜像 & \code{bagel\_xpu} 额外依赖；Intel 镜像 & 钉住 vllm-xpu-kernels 0.1.15.4；镜像钉住驱动与 IGC，torch 2.13.0+xpu，但克隆 main、不锁 commit & \code{pyproject.toml:173--186}；\code{Dockerfile.xpu:5, 18--20, 81, 90} \\
+测试 & XPU 单测与 BAGEL 测试 & 没有 XPU 设备时跳过；M* 的 CI 只在 ubuntu-latest 上跑 & \code{test\_xpu\_attention.py:349}；\code{ci.yml:16} \\
+\bottomrule
+\end{tabularx}
+\memo{以 M* 2c8ffde（2026-11-15）为准。较 9c6f1ad 新增：共享内存池的 XPU 分支（\#1132，11-06）；DCP（\#1124，11-12）不含 XPU；\#1413 改了 \code{Dockerfile.xpu}。}
+\takeaway{交付物齐全；缺的是 BAGEL 以外模型的配置，以及 XPU 硬件 CI。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（四）：M* 上 7 个模型还差什么}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.6cm} Y Y p{2.2cm}}
+\toprule
+\rowcolor{Mist}
+模型 & 代码上已有 & 模型自身还缺什么 & 工作量（人周） \\
+\midrule
+BAGEL（T2I、I2I、I2T） & TP2、CFG-TP2 配置；本机实测 B70 上 M* 与 vLLM-Omni 都能跑，对比与日志见第 3 部分 & 图捕获：TP2 下捕获失败、TP1 下显存不足（本机实测）；2 卡 CFG 并行配置需自己写 & 1--2 \\
+Qwen3-Omni（文本、语音） & 没有 XPU 配置；MoE 与音频解码器的滑窗核都是 Triton，代码无 XPU 分支 & 写配置（主干注意力切 \code{xpu\_paged}，确认无滑窗层）；验证 Triton 核 & 1--2 \\
+Qwen3-TTS & 深度帧 Gluon 核只在 Hopper 启用，XPU 走 PyTorch 回退（\code{depth\_frame/\_\_init\_\_.py:60}） & 写配置；验证滑窗编解码器与 Triton 核 & 1 \\
+Pi0.5（VLA） & 注意力默认 FlashInfer（\code{flashinfer\_backend: fa2}），XPU 上不可用 & 切到 \code{xpu\_paged}；核对前缀 KV 与动作专家的非因果注意力 & 1--2 \\
+Cosmos3（T2I、T2V、I2V、V2V、机器人动作） & 配置普遍开图捕获，部分用 SP；稠密与块因果注意力只有 FlashInfer 或 FA3，都是 CUDA 专用 & SP 配置改用 TP（文档写明 XPU 不支持 SP）；另需下页的稠密与块因果注意力 & 2--4 \\
+V-JEPA 2-AC（世界模型） & 主要用 PyTorch SDPA，依赖少 & 跑通、比对结果、图捕获 & 0.5--1 \\
+Orpheus（TTS） & SDPA 与编译，无 CUDA 图；有 TP2 配置 & 跑通；TP2 的 XPU 通信与结果比对 & 1--2 \\
+\bottomrule
+\end{tabularx}
+\memo{工作量为单人估计，未在 XPU 上试跑；不含下页的共性项。}
+\takeaway{BAGEL 已通；V-JEPA 2-AC 与 Orpheus 依赖最少；Cosmos3 是最大的单项。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（五）：共性缺口}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.6cm} Y Y p{2.2cm}}
+\toprule
+\rowcolor{Mist}
+缺口 & 现状与代码依据 & 要做什么 & 工作量（人周） \\
+\midrule
+分页注意力功能不全 & 滑窗、\code{sm\_scale}、块因果、稠密、MLA、上下文并行被拒绝（\code{attn/base.py:193--206, 261}）；封装接口有 \code{window\_size}、\code{softmax\_scale}（\code{vllm/\_xpu\_ops.py:1020}） & 接入滑窗与 scale；块因果与稠密另做；上下文并行不做 & 滑窗与 scale 1--2；块因果与稠密 3--5 \\
+Triton 核 & 约 40 个文件；Gluon 核为 NVIDIA 专用；调优表只有 NVIDIA（\code{mstar/kernels/tables/}） & 逐个做正确性检查，补 XPU 调优或回退 & 2--4 \\
+图捕获 & XPU 图后端已接（\code{accelerator\_graph\_backend.py:195}）；BAGEL 默认关 & 逐模型开启、比对、测性能 & 2--3 \\
+观测与剖析 & 实验框架用 nvidia-smi、nsys；NVTX 在 XPU 禁用（\code{docs/serving.rst:87}） & 接入 xpu-smi 与 XPU 剖析器 & 1--2 \\
+CI 与版本锁定 & M* CI 不跑 XPU；\code{Dockerfile.xpu:81} 克隆 main & 自托管 B70 runner；锁定版本 & 1--2 \\
+\bottomrule
+\end{tabularx}
+\memo{工作量为单人估计，未在 XPU 上试跑。\code{window\_size}、\code{softmax\_scale} 来自上游封装，M* 锁定的 0.1.15.4 需在 B70 核对。}
+\takeaway{共性里最大的两项是注意力功能不全和 Triton 核验证。}
+\end{frame}
+
+\begin{frame}[t]{Intel GPU（六）：工作量合计与下一步}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{4.2cm} p{2.6cm} Y}
+\toprule
+\rowcolor{Mist}
+项 & 工作量（人周） & 说明 \\
+\midrule
+7 个模型自身 & 7.5--14 & 上两页模型表的合计 \\
+共性项 & 10--18 & 注意力功能、Triton 核、图捕获、观测、CI \\
+\textbf{合计} & \textbf{约 18--32（约 4--7 人月）} & 单人估计；按模型重叠扣减后取这一区间 \\
+其中 Cosmos3 相关 & 5--9 & 模型自身 2--4，加上稠密与块因果注意力 3--5 \\
+不含 Cosmos3 & 约 13--23 & 可作为先行范围 \\
+\bottomrule
+\end{tabularx}
+\memo{这些数字是估计。最快的收敛办法：用 B70 把 7 个模型的 YAML 各改一行注意力后端（\code{xpu\_paged}）跑冒烟测试，记下第一个失败点，约 2--3 天即可把估计落到具体问题。}
+\takeaway{建议顺序：先做依赖少的 V-JEPA 2-AC、Orpheus、Pi0.5，再做 Qwen3-Omni 与 Qwen3-TTS，Cosmos3 放最后。}
+\end{frame}
+
+\begin{frame}[t]{模型支持：本报告涉及的模型}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.2cm} Y Y}
+\toprule
+\rowcolor{Mist}
+模型 & \textcolor{Teal}{M*} & vLLM-Omni \\
+\midrule
+Qwen3-Omni（文本与语音） & 支持 & 支持；文档标 Intel \\
+Qwen3-TTS & 支持，三种变体 & 支持；CustomVoice 标 Intel \\
+BAGEL（T2I、I2I、I2T） & 支持；Intel 只有文档声明（TP2 配置） & 支持；文档标 Intel \\
+Pi0.5（VLA） & 支持，最多 3 路相机 & 支持；文档标 Intel \\
+Cosmos3（视频 / 世界模型） & 支持：T2I、T2V、I2V、V2V，机器人动作 & 支持；文档列四种硬件 \\
+V-JEPA 2-AC（世界模型） & 支持 & 没有 \\
+Orpheus（TTS） & 支持；采样重归一化，与参考实现不完全一致 & 没有 \\
+\bottomrule
+\end{tabularx}
+\takeaway{模型覆盖上 M* 和 vLLM-Omni 最接近；BAGEL、Pi0.5、V-JEPA 2-AC、Orpheus 只有 M* 或只有 vLLM-Omni 有。}
+\end{frame}
+
+\begin{frame}[t]{架构规模：注册名数量不能直接比较}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} p{3.5cm} Y}
+\toprule
+\rowcolor{Mist}
+仓库 & 注册规模 & 主要家族 \\
+\midrule
+M* & 60 个注册名（54 个字面量，加 Qwen3.5 系列生成的 5 个和 Qwen3.8-27B 1 个），38 个类；模型都是自己维护 & LLM：qwen3\_5、glm52；扩散：wan22、ltx2\_5、flux2\_klein；TTS：orpheus、kokoro、cosyvoice3；ASR：whisper、parakeet；世界模型：vjepa2、waypoint \\
+vLLM-Omni & \code{\_OMNI\_MODELS} 登记 107 项（自有 105，与上游重叠 2 个）；\code{\_DIFFUSION\_MODELS} 登记 96 项，另有 1 个别名（89 个不同的类） & Omni：qwen2\_5\_omni、qwen3\_omni；扩散：QwenImage、Wan、LTX2、Flux；TTS：voxtral\_tts；世界模型：LingBot-World \\
+\bottomrule
+\end{tabularx}
+\takeaway{vLLM-Omni 的登记数只计自己的登记表，上游 vLLM 的模型不计入。以模型表和本报告的实测为准。}
+\end{frame}

@@ -1,0 +1,11 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2T 1 token \\
+\midrule
+单 stage TP2，不修 OpenCL & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{17.651\,\textcolor{Muted}{(17.648--17.651)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.376\,\textcolor{Muted}{(1.375--1.378)}}}\,$\star$ \\
+单 stage TP2，强制 MATH SDPA & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{17.660\,\textcolor{Muted}{(17.656--17.660)}}}\,$\star$ & 2.041\,\textcolor{Muted}{(2.037--2.047)} \\
+TP2，强制 MATH SDPA & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{12.957\,\textcolor{Muted}{(12.954--12.959)}}}\,$\star$ & \textcolor{Muted}{1.45\textsuperscript{§}} \\
+TP2，关 compile + MATH SDPA（早期 workaround） & \textcolor{Teal}{M*} & 13.901\,\textcolor{Muted}{(13.896--13.902)} & -- \\
+\bottomrule
+\end{tabularx}

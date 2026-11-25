@@ -1,0 +1,40 @@
+% XPU graph 研究（三卡）：图生文解码、扩散步、TP2 图捕获、去噪步 kernel 分布
+\setpart{BAGEL 实测 · XPU graph 与 kernel 分布（三卡）}
+
+\begin{frame}[t]{XPU graph（三卡，卡 0、1、2）：图生文解码，中位数，秒}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_graph_i2t}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 配置：M* CFG 并行，三个 rank 分别为卡 0 的主分支、卡 1 与卡 2 的两路引导分支；M* TP2，卡 0 为 ViT 与 VAE，卡 1、2 切分 LLM；Omni two-stage，Thinker TP2 在卡 0、1，DiT 在卡 2（图生文不使用 DiT）。
+  \item graph 只作用于 LLM 解码步。M* CFG 并行的 graph 无需补丁；M* TP2 的 graph 需要补丁（见下页）。
+  \item 两边图像输入规模一致：M* 为默认预处理的 1369 个图像 patch，Omni 提示为 1386 token（含 17 个文本 token）。
+\end{itemize}
+\takeaway{三卡下 graph 使 M* 的 64 token 解码在 CFG 并行中快 \pct{gCfgOn64}，在 TP2 中快 \pct{gTp2G64}。M* TP2 graph 后为 \val{tp2g/mstar-tp2-graph-fixed/i2t64} s，Omni two-stage graph 为 \val{g3/omni-tp2-graph-chat/i2t64} s，M* 仍慢 \pct{gTp2Gap}。}
+\end{frame}
+
+\begin{frame}[t]{XPU graph（三卡）：扩散步不变，TP2 图捕获的限制}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_graph_diff}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 扩散步两边都是 eager，graph 不作用于扩散。M* CFG 并行的 T2I 与 I2I 在 graph 前后基本持平（T2I \pct{gDiffT}，I2I \pct{gDiffI}）。vLLM-Omni 的 DiT 不支持 denoise graph。
+  \item M* TP2 图捕获失败的原因有三：(1) XCCL 的 \code{all\_reduce} 消息超过约 4 MiB 时无法进入 graph；(2) inductor 生成的 functional \code{all\_gather}（lm\_head 汇聚 logits）在 XPU graph 中不可用，普通 \code{all\_gather} 在约 4 行 logits 以内可用；(3) 最大的 prefill 捕获失败后，捕获状态残留，decode 随之失败。
+  \item 补丁（\code{scripts/patches/mstar\_xpu\_tp2\_graph.patch}）作用于已安装的 M* 包，未合入上游：\code{all\_gather} 不参与 compile；prefill 捕获 token 上限 512；decode 与 prefill 的捕获 batch size 限为 [1, 2, 4]。
+  \item 两卡 CFG 并行的 graph 因显存不足无法启动（每卡约 27 GiB 的完整模型）。
+\end{itemize}
+\takeaway{graph 只加速图生文的解码：64 token 快 19--50\%；1 token（预填充为主）只快 1--12\%。文生图与图像编辑的扩散步不经过 graph，前后差异在 1\% 以内。M* TP2 的 graph 需要补丁，CFG 并行则不需要。}
+\end{frame}
+
+\begin{frame}[t]{去噪步的 kernel 分布（单步，rank 0）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.08}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_kernel}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item Omni：单 stage CFG 并行，卡 0、1（完整一步）。M*：CFG 并行，卡 0、1、2（58 ms 片段，只比较占比）。
+\end{itemize}
+\takeaway{Omni 的非 gemm、非 attention 小 kernel 约 68 ms（占 35\%）；单个 gemm 两边平均耗时相同（0.52 与 0.55 ms）。M* 整步未取得，整步差距未完全分配。}
+\end{frame}

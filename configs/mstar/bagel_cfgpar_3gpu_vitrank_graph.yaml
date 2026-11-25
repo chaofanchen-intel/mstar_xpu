@@ -1,0 +1,25 @@
+# M* BAGEL on 3 XPUs: CFG-parallel with ViT/VAE moved off the LLM cards, to leave graph-capture headroom.
+#   rank 0: main LLM branch + CFG combine      rank 1: cfg_text + cfg_img branches      rank 2: ViT/VAE
+# accelerator_graph: true.
+model: "bagel"
+model_kwargs:
+  accelerator_graph: true
+max_seq_len: 8192
+max_concurrent_requests: 1
+
+resources:
+  kv:
+    max_seq_len: 8192
+    page_size: 64
+    max_num_pages: 192
+  attn:
+    backend: "xpu_paged"
+
+node_groups:
+  - node_names: [vit_encoder, vae_encoder, vae_decoder]
+    ranks: [2]
+  - node_names: [LLM, combine_cfg]
+    ranks: [0]
+  - node_names: [LLM_cfg_text, LLM_cfg_img]
+    ranks: [1]
+    graph_walks: [image_gen_cfg2, image_gen_cfg3]

@@ -1,0 +1,17 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2T 1 token & I2T 64 token & I2I 512²·50 步 \\
+\midrule
+M* CFG 并行 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{7.678\,\textcolor{Muted}{(7.655--7.706)}}}\,$\star$ & 0.085\,\textcolor{Muted}{(0.085--0.086)} & 2.458\,\textcolor{Muted}{(2.454--2.461)} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{16.792\,\textcolor{Muted}{(16.755--16.811)}}}\,$\star$ \\
+M* CFG 并行 · compile 关（诊断）· 缓存开 & \textcolor{Teal}{M*} & 8.476\,\textcolor{Muted}{(8.463--8.486)} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.083\,\textcolor{Muted}{(0.082--0.092)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{2.169\,\textcolor{Muted}{(2.168--2.172)}}}\,$\star$ & 18.251\,\textcolor{Muted}{(18.235--18.258)} \\
+M* TP2 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & 12.955\,\textcolor{Muted}{(12.951--12.961)} & 0.330\,\textcolor{Muted}{(0.329--0.333)} & 3.156\,\textcolor{Muted}{(3.151--3.165)} & 21.208\,\textcolor{Muted}{(21.198--21.212)} \\
+M* CFG 并行 · compile 开 · 缓存关 & \textcolor{Teal}{M*} & -- & 0.293\,\textcolor{Muted}{(0.292--0.293)} & 2.656\,\textcolor{Muted}{(2.647--2.658)} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{16.815\,\textcolor{Muted}{(16.801--16.826)}}}\,$\star$ \\
+\midrule
+Omni 单 stage CFG 并行 · 无 compile & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{9.978\,\textcolor{Muted}{(9.973--9.992)}}}\,$\star$ & -- & -- & -- \\
+Omni 单 stage TP2 · 无 graph & \textcolor{Orange}{Omni} & 17.040\,\textcolor{Muted}{(17.038--17.043)} & -- & -- & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{28.076\,\textcolor{Muted}{(28.074--28.082)}}}\,$\star$ \\
+Omni two-stage · 缓存关 · eager & \textcolor{Orange}{Omni} & 17.987\,\textcolor{Muted}{(17.971--17.992)} & 0.193\,\textcolor{Muted}{(0.192--0.193)} & 1.882\,\textcolor{Muted}{(1.881--1.891)} & \textcolor{Muted}{30.76\textsuperscript{†}} \\
+Omni two-stage · 缓存关 · Thinker graph & \textcolor{Orange}{Omni} & -- & 0.191\,\textcolor{Muted}{(0.191--0.192)} & 1.861\,\textcolor{Muted}{(1.856--1.862)} & -- \\
+Omni two-stage · 缓存开 · eager & \textcolor{Orange}{Omni} & -- & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{0.053\,\textcolor{Muted}{(0.052--0.053)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.744\,\textcolor{Muted}{(1.743--1.749)}}}\,$\star$ & -- \\
+\bottomrule
+\end{tabularx}

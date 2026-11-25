@@ -1,0 +1,101 @@
+% BAGEL 实测：测试环境、配置定义、统一工作量
+\setpart{BAGEL 实测 · 环境与配置}
+
+\begin{frame}[t]{测试环境：Intel Arc Pro B70}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.6cm} Y Y}
+\toprule
+\rowcolor{Mist}
+ & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+源码 & \code{external/mstar} main 2c8ffde8f（最新提交） & \code{external/vllm-omni} main a36de509e（2026-11-21）；对照版本 v0.32.0 \\
+PyTorch / 内核 & torch 2.13.0+xpu；vllm-xpu-kernels 0.1.15.4（M* 的 \code{[bagel\_xpu]} 固定） & torch 2.15.0+xpu；vllm-xpu-kernels 0.1.17（vLLM 0.34.0+xpu 固定） \\
+环境 & \code{mstar\_xpu/.venv} & \code{\textasciitilde/workspaces/.venvs/vllm-omni-main}（v0.32 环境保留为 \code{vllm-omni-v0.32.0}） \\
+模型 & \multicolumn{2}{Y}{BAGEL-7B-MoT（同一份 BF16 权重），约 27 GiB；两个框架都不做量化、缓存加速或减步} \\
+硬件 & \multicolumn{2}{Y}{Arc Pro B70 $\times$3（每张 32 GiB），单 NUMA。两卡结果使用卡 1、2；三卡研究使用卡 0、1、2。运行前检查卡占用，只在空闲卡上运行} \\
+\bottomrule
+\end{tabularx}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 两个框架各用各自源码要求的 torch 与内核版本，没有强行统一。两边都使用 eager 执行，即不启用 XPU graph；M* 默认开启 \code{torch.compile}，vLLM-Omni 无 compile。
+  \item 并行拓扑、compile、缓存的每种组合都是一个命名配置，下两页给出定义。
+\end{itemize}
+\takeaway{两卡结论适用于卡 1+2 与本次软件版本；三卡结论适用于卡 0、1、2。卡对之间的通信速度不同，其他卡对未测。}
+\end{frame}
+
+\begin{frame}[t]{配置定义：两卡（卡 1、2）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.1}\setlength{\tabcolsep}{2.5pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.2cm} p{1.0cm} p{3.4cm} Y c c c}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & 卡与分工 & 说明 & compile & 前缀缓存 & graph \\
+\midrule
+M* CFG 并行 & \textcolor{Teal}{M*} & 卡 1、2 各一份完整 LLM & 卡 1 算主分支，卡 2 算引导分支；无 TP 通信 & 开 & 开 & 无 \\
+M* CFG 并行，缓存关 & \textcolor{Teal}{M*} & 同上 & 仅关闭 KV 前缀缓存 & 开 & 关 & 无 \\
+M* CFG 并行，compile 关 & \textcolor{Teal}{M*} & 同上 & hook 关闭 \code{torch.compile}，非官方，仅诊断 & 关 & 开 & 无 \\
+M* TP2 & \textcolor{Teal}{M*} & 卡 1、2 切分 LLM；ViT、VAE 在卡 1 & 每层 all-reduce；官方 \code{bagel\_xpu\_tp2} 的两卡版 & 开 & 开 & 无 \\
+Omni 单 stage CFG 并行 & \textcolor{Orange}{Omni} & 整个模型一个 stage & 两路 CFG 分支各占一卡；I2I 需要 3 路 & 无 & — & 无 \\
+Omni 单 stage TP2 & \textcolor{Orange}{Omni} & 整个模型一个 stage，TP2 & 图像编辑的两卡最优方案 & 无 & — & 无 \\
+Omni two-stage & \textcolor{Orange}{Omni} & Thinker 在卡 1，DiT 在卡 2 & KV 经 connector 传给 DiT；Thinker 的 \code{max\_model\_len} 为 6144 & 无 & 关 & 无 \\
+Omni two-stage，缓存开 & \textcolor{Orange}{Omni} & 同上 & 仅开启 Thinker 前缀缓存 & 无 & 开 & 无 \\
+Omni two-stage，graph & \textcolor{Orange}{Omni} & 同上 & Thinker 启用 graph；扩散仍为 eager & 无 & 关 & 开 \\
+\bottomrule
+\end{tabularx}
+\vspace{3pt}
+\memo{两卡上 M* 的最优配置是 CFG 并行（compile 开，缓存开）；vLLM-Omni 文生图用单 stage CFG 并行，图像编辑用单 stage TP2，图生文用 two-stage。}
+\end{frame}
+
+
+\begin{frame}[t]{配置定义：三卡（卡 0、1、2）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.1}\setlength{\tabcolsep}{2.5pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.4cm} p{1.0cm} p{3.4cm} Y c c c}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & 卡与分工 & 说明 & compile & 前缀缓存 & graph \\
+\midrule
+M* CFG 并行（三卡） & \textcolor{Teal}{M*} & 卡 0 主分支；卡 1、2 各一路引导分支 & 官方三 rank 的 CFG 方案，三卡都是完整模型 & 开 & 开 & 无 \\
+M* CFG 并行（三卡），缓存关 & \textcolor{Teal}{M*} & 同上 & 仅关闭 KV 前缀缓存 & 开 & 关 & 无 \\
+M* CFG 并行（三卡），graph & \textcolor{Teal}{M*} & 同上 & graph 开启；未打补丁 & 开 & 开 & 开 \\
+M* TP2（三卡） & \textcolor{Teal}{M*} & 卡 0 为 ViT、VAE；卡 1、2 切分 LLM & LLM 切分与两卡 TP2 相同 & 开 & 开 & 无 \\
+M* TP2（三卡），graph & \textcolor{Teal}{M*} & 同上 & 需对 M* 打补丁，未合入上游 & 开 & 开 & 开 \\
+Omni two-stage（三卡） & \textcolor{Orange}{Omni} & Thinker TP2 在卡 0、1；DiT 在卡 2 & 图生文不使用 DiT & 无 & 关 & 无 \\
+Omni two-stage（三卡），graph & \textcolor{Orange}{Omni} & 同上 & Thinker 启用 graph；扩散仍为 eager & 无 & 关 & 开 \\
+Omni 单 stage CFG 并行（三卡） & \textcolor{Orange}{Omni} & 卡 0、1、2 各一路 CFG 分支 & I2I 的三路 CFG 方案 & 无 & — & 无 \\
+\bottomrule
+\end{tabularx}
+\vspace{3pt}
+\memo{三卡配置用于 XPU graph 研究与 I2I 的三路 CFG 比较；两卡结论不依赖三卡数据。}
+\end{frame}
+
+
+\begin{frame}[t]{统一工作量：同一个客户端、同一张输入图、相同的步数与 CFG}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.0cm} Y}
+\toprule
+\rowcolor{Mist}
+case & 定义（\code{scripts/bench\_bagel.py}，两个框架共用） \\
+\midrule
+T2I 文生图 & prompt \code{A red ceramic cup on a white table}，512$\times$512，50 个时间步，shift 3.0，CFG text 4.0 / img 1.0，作用区间 [0.4, 1.0]，renorm \code{global}（区间内 2 路分支，区间外 1 路） \\
+I2T 1 token & 512$\times$512 输入图 + 一句描述问题，贪心解码，只生成 1 个 token（即图像编码 + 预填充，不含解码） \\
+I2T 64 token & 同一输入图 + 详细描述问题，贪心解码，\code{ignore\_eos} 生成精确 64 个 token（用 usage 与 tokenizer 校验） \\
+I2I 图像编辑 & 同一输入图，指令 \code{Replace the bagel with a croissant.}，输出 512$\times$512，50 步，CFG text 4.0 / img 2.0，区间 [0, 1]，renorm \code{text\_channel}（每步 3 路分支） \\
+\bottomrule
+\end{tabularx}
+\vspace{6pt}
+\memo{T2I 与 I2T、I2I 的参数在两个框架上一致。两个框架各自的执行方式（并行拓扑、compile、缓存）见上一页的配置定义。}
+\takeaway{四类 case 的请求定义在两个框架上相同，定义全部来自 \code{scripts/bench\_bagel.py}。}
+\end{frame}
+\begin{frame}[t]{统一工作量（续）：输入 token、缓存与测量方法}
+\small
+\begin{itemize}\setlength\itemsep{3pt}
+  \item \kw{输入图像 token}（以 vLLM-Omni 返回的 \code{usage.prompt\_tokens} 核对）：I2T 为 \textbf{1386 token}（1369 个图像 patch + 17 个文本 token），M* 默认预处理同为 1369 patch。I2I 两边均为 1369 个图像 patch，vLLM-Omni 由源码确认（usage 不记录图像 token）。I2I 指令为“Replace the bagel with a croissant.”。
+  \item \kw{前缀缓存}：M* 默认开，vLLM-Omni 的 Thinker 默认关。基准每次发送相同的图和问题，缓存会命中，因此 I2T 分缓存关、开两组比较。
+  \item \kw{测量与步数}：每个 case 做 2 次 warmup 与 5 次稳态测量，串行 HTTP，端到端计时。步数与 shift 固定为 50 / 3.0；M* 不暴露随机种子，只比较延迟。
+  \item \kw{只做不改变计算量的优化}：并行拓扑、compile、graph、connector、前缀缓存。不使用 TeaCache、Cache-DiT、量化或减少步数。
+\end{itemize}
+\takeaway{四类 case 两边的计算量一致：图像 token 均为 1369 patch（I2I 另有 1024 个 VAE latent），}
+\end{frame}

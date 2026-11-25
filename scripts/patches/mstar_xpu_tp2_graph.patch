@@ -1,0 +1,48 @@
+--- results/20261124_tp2graph/submodules.py.orig	2026-11-24 10:45:11.930713810 +0000
++++ .venv/lib/python3.12/site-packages/mstar/model/bagel/submodules.py	2026-11-24 11:28:54.716631933 +0000
+@@ -989,9 +989,9 @@
+ 
+         return tensor_inputs
+ 
+-    PREFILL_TEXT_TOKEN_BUCKETS = [128, 256, 512, 1024, 2048]
++    PREFILL_TEXT_TOKEN_BUCKETS = [128, 256, 512]  # DIAG: XCCL all_reduce > ~4 MiB cannot be captured on XPU (512 tok x 3584 x 2 B = 3.5 MiB)
+     # past 4 for mixed_text, whose decode rows ride in these captures
+-    PREFILL_TEXT_CAPTURE_BATCH_SIZES = [1, 2, 4, 8, 16, 32, 64]
++    PREFILL_TEXT_CAPTURE_BATCH_SIZES = [1, 2, 4]  # DIAG: XCCL all_gather captures only up to ~4 rows of logits
+ 
+     def get_accelerator_graph_configs(
+         self, device: torch.device, tp_world_size: int = 1,
+@@ -1020,6 +1020,7 @@
+                 # max-autotune until the default compile level (mstar serve -O) is measured on this model
+                 compile_mode="max-autotune-no-cudagraphs",
+                 capture_graph_walk="decode",
++                capture_batch_sizes=[1, 2, 4],
+                 additional_key_info=False,
+                 single_request_inputs=ARNodeInputs(
+                     input_ids=torch.zeros(1, dtype=torch.long, device=device),
+@@ -1030,6 +1031,7 @@
+                 # max-autotune until the default compile level (mstar serve -O) is measured on this model
+                 compile_mode="max-autotune-no-cudagraphs",
+                 capture_graph_walk="decode",
++                capture_batch_sizes=[1, 2, 4],
+                 additional_key_info=True,
+                 single_request_inputs=ARNodeInputs(
+                     input_ids=torch.zeros(1, dtype=torch.long, device=device),
+--- results/20261124_tp2graph/communication.py.orig	2026-11-24 11:28:54.699445913 +0000
++++ .venv/lib/python3.12/site-packages/mstar/distributed/communication.py	2026-11-24 11:28:54.715758150 +0000
+@@ -66,7 +66,14 @@
+     _all_gather_single = getattr(
+         getattr(dist, "distributed_c10d", None), "all_gather_single", None
+     )
+-_all_gather_into_tensor = _all_gather_single or dist.all_gather_into_tensor
++_all_gather_into_tensor_raw = _all_gather_single or dist.all_gather_into_tensor
++
++
++# XPU: traced as a functional collective, all_gather fails inside graph capture ("wait method cannot be used for an
++# event associated with a command graph"); the plain collective captures for messages up to ~1 MiB per rank.
++@torch.compiler.disable
++def _all_gather_into_tensor(output, input_, group=None):
++    return _all_gather_into_tensor_raw(output, input_, group=group)
+ 
+ 
+ def _barrier(group: dist.ProcessGroup | None = None) -> None:

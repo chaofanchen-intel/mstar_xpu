@@ -1,0 +1,463 @@
+% 新模型接入（正文）：讲清楚接入是什么、两个框架各要做什么、投入差在哪里。
+% 文件与行号以各页的代码位置为准；指南与代码的差异见“常见问题”一页。
+% 依据：各 checkout 的 docs/（官网指南的构建源）与 external_latest 最新 main 源码；历史投入来自近期接入提交的 git show --numstat。
+\setpart{模型接入工作量}
+
+\begin{frame}[t]{“接入一个新模型”到底是什么？}
+\small
+“能加载权重”不等于“接入完成”。一个模型要能在服务里被用户正常调用，至少要做到下面五件事：
+\begin{itemize}
+  \item \kw{框架认得它}：注册表里有它的模型类，HF 配置能解析，默认部署配置存在。缺了，服务可能能启动，但用户找不到入口。
+  \item \kw{请求能进出}：把 OpenAI 形式的请求变成模型输入，再把输出变回音频、图像或文本。
+  \item \kw{执行顺序对}：编码器、LLM、解码器、声码器等组件，按照图或 stage 的顺序执行；循环与停止条件要明确。
+  \item \kw{状态不串、可取消}：每个请求自己的 KV、采样状态、音频缓冲互不干扰；取消、超时、报错后资源能回收。
+  \item \kw{有验收}：CPU 单测、GPU 端到端，以及真实服务请求都通过。
+\end{itemize}
+\takeaway{接入的工作量来自上面五件事里“框架原本没有的部分”，而不是模型文件的数量。}
+\end{frame}
+
+\begin{frame}[t]{同一件事，两个框架叫法不同}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} Y Y}
+\toprule
+\rowcolor{Mist}
+要做的事 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+让框架认出模型 & \code{MODEL\_REGISTRY}（模型类路径）；需要 HF 下载时加 \code{HF\_MODELS} & \code{\_OMNI\_MODELS} 登记类；\code{OMNI\_PIPELINES} 登记拓扑 \\
+描述执行结构 & 模型的“图”（graph）与 walk：一次请求走哪条路 & \code{PipelineConfig} 列出 stage，声明输入来源与终态 \\
+每一步的计算单元 & \code{NodeSubmodule}，每个图节点一个 & 每个 stage 的模型类 \\
+请求间的状态 & \code{declare\_state}：声明 Array / Sampler / SeqShard & stage input processor：full-payload、async-chunk 或 token-only 三种交接 \\
+部署配置 & \code{configs/\allowbreak{}*.yaml} 的 \code{node\_groups}（节点放在哪些 GPU） & deploy YAML（GPU、显存、并行、connector、采样默认值） \\
+对外 API 适配 & Python 适配器 + Rust frontend（按类名查找） & \code{tts\_adapters}（TTS 路由）；其余走 serving 层 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{名字是各框架自己的，但都在回答同一个问题：框架怎样找到模型、怎样执行、怎样管状态、怎样部署、怎样对外。对照时只看“对应的职责”。}
+\takeaway{理解了这张表，两家的接入步骤就能对上号。后面的页面都用这里的名字。}
+\end{frame}
+
+\begin{frame}[t]{框架提供的模板：接入时要填的契约（一）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.14}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+契约 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+注册与发现 & \code{MODEL\_REGISTRY} 指向模型类；\code{HF\_MODELS} 给出权重来源；\code{DEFAULT\_CONFIGS} 给出默认配置 & \code{\_OMNI\_MODELS} 登记模型类；\code{OMNI\_PIPELINES} 登记拓扑（值可以是配置，也可以是按 HF config 解析的函数）；\code{\_DIFFUSION\_MODELS} 登记扩散管线 \\
+请求进入 & \code{process\_prompt} 把文本与媒体变成张量包 \code{NameToTensorList}；输入顺序由 \code{input\_modalities} 决定 & 请求是 \code{OmniTokensPrompt}：\code{prompt\_token\_ids}、\code{prompt\_embeds}、\code{additional\_information}、多模态数据；\code{prompt\_transform\_func} 与 \code{prompt\_expand\_func} 可改写或展开请求 \\
+执行结构 & \code{get\_graph\_walk\_graphs} 按 walk 返回图（\code{GraphNode}、\code{Sequential}、\code{Parallel}、\code{Loop}）；\code{walk\_plan} 决定每个分区走哪些 walk & \code{PipelineConfig} 列出 stage：\code{model\_stage}、\code{execution\_type}、\code{input\_sources}、\code{final\_output}、\code{owns\_tokenizer} \\
+阶段间数据 & 边（\code{GraphEdge}）带名字与标志：\code{persist}、\code{is\_streaming}、\code{output\_modality} & stage 的 processor 有三种 hook：\code{full\_payload}、\code{async\_chunk}、\code{token\_only}；内容为 \code{OmniPayload}（键如 \code{hidden\_states}、\code{embed}、\code{codes}、\code{meta}） \\
+数据传输 & 工作进程间的张量协议 \code{CommProtocol}：IPC、TCP、RDMA、SHM；KV 可经 Mooncake TransferEngine 传输 & \code{OmniConnectorBase}，方法为 \code{put}、\code{get}、\code{cleanup}；每条边在 YAML 中指定 connector（如 SharedMemory、Mooncake、NIXL） \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{依据：两家 checkout 的接入指南（\code{docs/}）与源码中的类定义。}
+\takeaway{两家都提供成套的契约。M* 把执行写成图与张量边，vLLM-Omni 把执行写成 stage 流水线与 payload 交接。}
+\end{frame}
+
+\begin{frame}[t]{框架提供的模板：接入时要填的契约（二）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.14}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+契约 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+输出 & \code{postprocess} 把输出转成客户端字节；\code{EMIT\_TO\_CLIENT} 边标明 \code{output\_modality} & \code{forward} 返回 \code{OmniOutput}；stage 结果为 \code{OmniRequestOutput}，\code{final\_output\_type} 标明模态 \\
+请求状态 & \code{declare\_state} 声明 \code{Array}、\code{Sampler}、\code{SeqShard}；每请求的 \code{Layout} 由 \code{process\_prompt} 给出；\code{check\_stop} 判停 & 沿用 vLLM 的调度与 KV 块管理；\code{StagePipelineConfig} 声明 \code{retains\_state\_across\_chunks} 等 \\
+对外接口 & \code{OpenAIAdapter} 的功能开关（chat、speech、images 等）决定暴露哪些路由；注册到 \code{ADAPTER\_REGISTRY} 并移植到 Rust frontend；只走 \code{/generate} 的模型不需要适配器 & \code{OmniServingCapability} 与 \code{endpoint\_restrictions} 控制路由；\code{chat\_template} 写在 \code{PipelineConfig}；TTS 用 \code{ARTTSAdapter} 或 \code{DiffusionTTSAdapter} \\
+部署配置 & \code{node\_groups} 把节点映射到 GPU rank，可限定 \code{graph\_walks}；\code{resources} 设置 KV 与注意力后端 & \code{StageDeployConfig}：\code{devices}、\code{num\_replicas}、\code{input\_connectors}、\code{output\_connectors}、\code{async\_chunk}、\code{gpu\_memory\_utilization} \\
+并行 & 每个 node group 的分片轴：\code{tp}、\code{cfg}、\code{sp}（MoE 另有 \code{ep\_config}） & stage 的 \code{tensor\_parallel\_size}、\code{cfg\_parallel\_size}、\code{sequence\_parallel\_size}，及 Ulysses、Ring 度数 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{字段名以两家 external\_latest 的 main 为准。版本变化时，需要按同一清单重新核对。}
+\takeaway{契约的名字不同，但每一项都必须有对应的实现。漏掉任何一项，模型要么找不到入口，要么在运行时出错。}
+\end{frame}
+
+\begin{frame}[t]{框架提供的模板：接入时要填的契约（三）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.14}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+契约 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+错误与失败 & \code{ValueError} 转为 400（输入不可服务）；模型计划错误为 500；工作进程退出时，等待中的请求返回 503 & 错误语义见 \code{docs/design/module/error\_contracts.md}；connector 接收可设截止时间（\code{get\_with\_deadline}） \\
+取消与回收 & 请求移除时引擎调用 \code{cleanup\_request}，删除该请求在节点上的状态 & connector 的 \code{cleanup(request\_id)} 回收数据；未完成的接收用 \code{abandon\_get} 放弃 \\
+LoRA & \code{lora\_roots()} 声明适配器；\code{prompt\_lora\_adapters()} 列出可用于某条 prompt 的适配器；客户端指定的适配器经 \code{lora\_adapter} 传入 & 实现位于 \code{vllm\_omni/lora}，设计见 \code{docs/design/feature/lora.md} \\
+观测 & \code{mstar/observability/} 记录边的传输与事件（如 \code{EdgeTransfers}） & 指标定义见 \code{docs/design/metrics.md} \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{并发与取消时的状态隔离，两家都需要单独的测试（见“接入完成”的验收门）。}
+\takeaway{这些项目不影响单次输出，却决定服务在失败、取消和多适配器场景下是否正确。}
+\end{frame}
+
+\begin{frame}[t]{阶段之间的数据：两边都要回答“传什么、谁来搬、何时结束”}
+\small
+\begin{columns}[T,onlytextwidth]
+  \column{.48\textwidth}
+  \textbf{M*：边就是数据}
+  \begin{itemize}\setlength\itemsep{3pt}
+    \item 边是具名的张量包（\code{NameToTensorList}），边名即键。
+    \item 边的标志定生命周期：\code{persist} 留在 conductor；\code{is\_streaming} 让 token 在目标缓冲中累积。
+    \item 图内数据流由图声明：\code{img\_emb} 发给 \code{LLM}；去噪 latents 在步间传递。
+    \item 工作进程之间直接路由张量；conductor 推进 walk 并发送输入。
+    \item 传输协议由部署决定（IPC、TCP、RDMA、SHM）。
+  \end{itemize}
+  \column{.48\textwidth}
+  \textbf{vLLM-Omni：processor 与 connector}
+  \begin{itemize}\setlength\itemsep{3pt}
+    \item 阶段间内容是 \code{OmniPayload}（TypedDict）；async chunk 用 \code{OmniPayloadStruct}。
+    \item processor 决定发什么：\code{full\_payload} 在工作进程侧打包，\code{async\_chunk} 按块发出，\code{token\_only} 只分配下游槽位。
+    \item connector 决定怎么运：\code{put} 与 \code{get}，默认经 \code{OmniSerde}（msgpack）序列化；每条边可选不同 connector。
+    \item KV 交接由 \code{omni\_kv\_config} 声明，由 \code{OmniKVTransferManager} 执行。
+  \end{itemize}
+\end{columns}
+\takeaway{两边都要回答同样的问题：边上传什么，谁负责搬运，何时结束。M* 的答案写在图的边里，vLLM-Omni 的答案写在 processor 与 connector 里。}
+\end{frame}
+
+\begin{frame}[t]{先判断新模型属于哪一层}
+\small
+按下面三个问题往下走，就能判断这次接入大概是哪一层：
+\begin{enumerate}
+  \item \kw{架构和任务已经能跑吗？}（同样的架构、同样的任务、同样的输出形式，只是换一个 checkpoint）\\
+  是 → \kw{L0}：只补配置、权重版本和文档。
+  \item \kw{框架的 core 里已有底层模型类吗？}（vLLM 的 AR 模型类）\\
+  是 → \kw{L1}：写模型类和接入层的代码；否 → \kw{L2}：还要补底层模型本身。
+  \item \kw{是多阶段、流式、带循环，或者是 diffusion 吗？}\\
+  是 → 在 L1 或 L2 之上再加 \kw{L3} 的工作：stage 拓扑、chunk 交接、循环与停止、取消与资源回收。
+\end{enumerate}
+\vspace{4pt}
+\memo{同一个模型可以跨层。例：TTS 模型的 LLM 部分已有 AR 实现（L1），但声码器和流式交接是新的（L3）。}
+\takeaway{先判断层级，再查框架是否有现成的同类路径。层级比框架名更能决定投入。}
+\end{frame}
+
+\begin{frame}[t]{四个层级：额外要做的事与为什么贵}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.16}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.6cm} Y Y}
+\toprule
+\rowcolor{Mist}
+层级 & 额外要做的事 & 为什么贵（或不贵） \\
+\midrule
+L0 \newline 只换 checkpoint & 权重版本、部署配置、采样默认值、文档、smoke test & 没有新执行代码。风险主要在配置和 prompt 模板是否对得上。 \\
+L1 \newline 新模型类，底层 AR 已有 & 模型包、stage 或 pipeline 配置、请求构造、payload、YAML & 框架已提供调度、KV、connector，主要是把新模型“接进”现成流程。 \\
+L2 \newline 新 AR 架构 & 在 L1 的基础上，还要补底层模型：权重映射、core 模型、多模态接口 & 框架原本不认识这个结构，底层执行语义要自己实现。 \\
+L3 \newline 多阶段 / 流式 / 循环 / diffusion & stage 拓扑或图、chunk 协议、循环步数与停止、每请求状态、取消回收、可能的共享基类 & 新增的是执行语义，而不是文件数。问题在于“框架原本没有这种形状”。 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{规模参考见下一页。规模是整个 PR 的行数，含测试和文档，不是人天。}
+\takeaway{最贵的通常不是“写模型”，而是“框架原本没有这个执行形状”。}
+\end{frame}
+
+\begin{frame}[t]{近期接入提交的规模（代理指标）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.2cm} p{1.2cm} Y Y Y}
+\toprule
+\rowcolor{Mist}
+层级 & 框架 & 例子 & 文件（新增 / 修改） & 行数（+/−） \\
+\midrule
+L0 & vLLM-Omni & Fish S2 Pro，仅部署 YAML & 2（1/1） & +99 \\
+L1 & M* & Ripple-65B，复用 MultimodalDecoderModel & 模型包 5 & +407（模型包） \\
+L1 & vLLM-Omni & Haru-4B，已有 vLLM 类 & 28（28/5） & +3815/0 \\
+L2 & M* & Fish Audio S2-Pro，无 scaffold，双 AR TTS & 26（13/13） & +4028/−1 \\
+\bottomrule
+\end{tabularx}
+\vspace{6pt}
+\memo{表格续下页。}
+\end{frame}
+\begin{frame}[t]{近期接入提交的规模（代理指标）（续）}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.2cm} p{1.2cm} Y Y Y}
+\toprule
+\rowcolor{Mist}
+层级 & 框架 & 例子 & 文件（新增 / 修改） & 行数（+/−） \\
+\midrule
+L2 & vLLM-Omni & YuE2-3B，新模型类与音频接口 & 27 & +3294/-6 \\
+L3 & M* & Fun-CosyVoice3，流式 TTS 多 stage & 27（15/12） & +5349/−11 \\
+L3 & vLLM-Omni & ABot-World，实时 AR-Diffusion & 21 & +4812/-6 \\
+\bottomrule
+\end{tabularx}
+\vspace{1pt}
+\memo{M* 的 Qwen3.8-27B（同一代码的新 checkpoint，9 个文件）未列入本页。}
+\takeaway{同一层级里，行数差异主要来自测试、变体和共享层改动；不能直接当作人力。}
+\end{frame}
+
+\begin{frame}[t]{怎么读这些行数}
+\small
+\begin{itemize}
+  \item \kw{行数含测试与文档。}两家的样本中，测试通常占 20%–35\%。M* 的 MiniMax-H3 有 21 个测试文件。
+  \item \kw{有的提交顺便改了共享层。}例如 Ming3-Audio 改了 vLLM-Omni 自身的核心 24 个文件。这些改动不是模型自己的工作，但会计入 PR。
+  \item \kw{M* 的历史提交用的是旧契约。}这些模型引入时用的是 \code{get\_node\_resources}，之后迁移到 \code{declare\_state} 的成本没有计入。
+  \item \kw{同样的行数，难度不同。}一个 TTS 的流式交接和一个纯 AR 模型的 KV 配置，行数可能差不多，难度却差很多。
+\end{itemize}
+\takeaway{行数只能说明“这类改动大概有多大”，不能用来比较两个框架谁更省事。}
+\end{frame}
+
+\begin{frame}[t]{M*：接入的七个步骤}
+\small
+\begin{enumerate}
+  \item \kw{登记模型。}在 \code{MODEL\_REGISTRY} 里把名字指向模型类；要从 Hugging Face 下载时加 \code{HF\_MODELS}（YAML 的 \code{model\_path\_hf} 可以覆盖）。
+  \item \kw{写 Model 类。}四个必需方法：\code{get\_graph\_walk\_graphs}（画出模型的图）、\code{walk\_plan}（决定一次请求走哪条路）、\code{process\_prompt}（请求变输入）、\code{get\_submodule}（为每个节点造执行单元）。
+  \item \kw{为每个节点写 NodeSubmodule。}\code{prepare\_inputs} 和 \code{forward} 必需；有 KV 或采样状态的节点要声明 \code{declare\_state}。
+  \item \kw{写配置。}\code{DEFAULT\_CONFIGS} 加名字；\code{configs/\allowbreak{}<name>.yaml} 用 \code{node\_groups} 决定节点放在哪些 GPU；\code{docs/\allowbreak{}models.rst} 加一行。
+  \item \kw{需要 OpenAI 接口时：}Python 适配器登记；Rust frontend 按 Python 类名查找适配器。
+  \item \kw{过门禁。}包要加入 \code{test\_state\_lint.py} 的 \code{PORTED}；必须覆写 \code{request\_kwargs}（CI 会检查）。
+  \item \kw{验证。}CPU 测试自动运行；GPU 集成测试和真实的 \code{mstar-serve} 请求通过。
+\end{enumerate}
+\takeaway{M* 最需要设计的是第 2、3 步：把模型描述成图，再把每个请求的状态声明清楚。}
+\end{frame}
+
+\begin{frame}[t]{M*：几个核心概念}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.16}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+概念 & 通俗解释 & 你要写什么 \\
+\midrule
+图（Graph） & 模型是一张有向图：节点是计算单元，边是数据流向。 & \code{get\_graph\_walk\_graphs} 返回图的描述。 \\
+Walk & 一次请求沿图走的一条路径。同一模型，不同请求可以走不同路径（例如文生图与图生文）。 & \code{walk\_plan} 按请求选择 walk。 \\
+节点（NodeSubmodule） & 图里一个计算节点的执行单元：准备输入、执行 forward、判断停止。 & 每个节点一个类，实现 \code{prepare\_inputs}、\code{forward}。 \\
+状态（declare\_state） & 请求期间需要保留的数据：KV、采样器、按序列分片的数组。框架靠它做复用、回收和停止。 & 节点声明自己的状态；不要自己管理 stream。 \\
+Loop 与 stop & 图里可以有循环（如扩散去噪、AR 解码）。循环上限和停止条件决定何时结束。 & \code{get\_loop\_caps} 定步数；\code{check\_stop} 判停止。 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{代码位置：Model 基类 \code{mstar/\allowbreak{}model/\allowbreak{}base.py}；节点基类 \code{mstar/\allowbreak{}model/\allowbreak{}submodule\_base.py}。}
+\takeaway{M* 的写法是“先把模型画成图，再填每个节点”。框架因此能知道每个请求的状态与停止点。}
+\end{frame}
+
+\begin{frame}[t]{M*：什么时候能套用现成 scaffold，什么时候要改 runtime}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.16}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.1cm} Y Y}
+\toprule
+\rowcolor{Mist}
+模型形状 & 可套用的 scaffold & 仍需手写 \\
+\midrule
+解码器 LLM + 视觉 / 音频编码器 & \code{MultimodalDecoderModel}（6 个包在用） & 模型类、编码器权重映射、prompt 模板、media 预处理 \\
+flow-matching 去噪循环（DiT） & \code{DenoiseLoopSubmodule}（5 个包在用） & transformer 与 VAE 移植、各钩子（\code{seed\_latents}、\code{denoise} 等）、质量验证 \\
+其它（如 Qwen3-Omni、BAGEL、LingBot-World、Cosmos3） & 不在上面两个 scaffold 上 & 按家族从头写，或使用各自的执行路径 \\
+需要新 kernel、新 transport 或新资源类型 & 无 & 要改 M* runtime 本身，投入不再局限于模型包 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{scaffold 的包数来自仓库内的 grep 统计；“在用”指当前 checkout 中有包继承它。}
+\takeaway{形状与现有 scaffold 匹配时，M* 的接入明显更快；形状不匹配时，投入会落到 runtime 中。}
+\end{frame}
+
+\begin{frame}[t]{vLLM-Omni：接入的八个步骤}
+\small
+\begin{enumerate}
+  \item \kw{HF 配置。}transformers 认识该 \code{model\_type} 吗？不认识，就在 \code{\_register\_omni\_hf\_configs()} 里加一项。
+  \item \kw{模型类。}复用 vLLM 已有的层与 weight loader。Omni 统一入口按 \code{model\_stage} 分派到各 stage 类（参考 Qwen3-Omni）。
+  \item \kw{登记类。}每个类在 \code{\_OMNI\_MODELS} 里登记一条。安装到 vLLM 的动作由 \code{register\_omni\_models\_to\_vllm()} 完成。
+  \item \kw{pipeline。}\code{PipelineConfig} 列出各 stage：用哪个架构、怎样执行、输入来自哪里、哪个是终态。在 \code{OMNI\_PIPELINES} 登记。
+\end{enumerate}
+\vspace{6pt}
+\memo{续下页。}
+\end{frame}
+
+\begin{frame}[t]{vLLM-Omni：接入的八个步骤（续）}
+\small
+\setcounter{enumi}{4}
+\begin{enumerate}
+  \item \kw{stage input processor。}定义 stage 之间的数据交接：full-payload、async-chunk 或 token-only。
+  \item \kw{deploy YAML。}GPU 放置、显存、并行、connector、采样默认值。顶层 \code{pipeline:} 键可以指定 pipeline。
+  \item \kw{对外接口（如有 TTS）。}新增 adapter 文件，在 \code{tts\_adapters/\allowbreak{}\_\_init\_\_.py} 加一行 import。不改 \code{serving\_speech.py}。
+  \item \kw{测试与文档。}模型、pipeline、processor、online 测试；\code{recipes/} 与 supported\_models 各加一行。
+\end{enumerate}
+\takeaway{vLLM-Omni 的工作重心在 pipeline 和 stage contract；底层模型类只有 vLLM core 没有时才是主项。}
+\end{frame}
+
+\begin{frame}[t]{vLLM-Omni：一个模型怎样被选中 pipeline}
+\small
+部署时，框架按下面的顺序找 pipeline，找到就停：
+\begin{enumerate}
+  \item deploy YAML 顶层的 \code{pipeline:} 键（用户或 recipe 指定的，优先级最高）。
+  \item checkpoint 的 HF \code{model\_type} 在 \code{OMNI\_PIPELINES} 里有映射：值是配置，或一个按 HF config 解析的函数（resolver）。
+  \item 按 HF \code{architectures} 匹配 \code{PipelineConfig} 的 predicate。
+\end{enumerate}
+\vspace{4pt}
+resolver 的作用是“同一个架构，不同变体走不同 pipeline”。例：Qwen3-Omni 按 \code{enable\_audio\_output} 决定是否带 talker；只输出文本时走 thinker-only。
+\takeaway{新模型如果有多个变体，要想清楚每个变体该选哪条 pipeline，并在 resolver 里写出来。}
+\end{frame}
+
+\begin{frame}[t]{vLLM-Omni：TTS 是“两 stage 或单 stage”加一个 adapter}
+\small
+\begin{itemize}
+  \item \kw{两种形态}：两个 stage（AR codec predictor → decoder），或单 stage AR streaming。
+  \item \kw{对外接口}：新增 \code{ARTTSAdapter} 子类，实现 \code{validate} 与 \code{build}，声明 \code{stage\_keys}。
+  \item \kw{在哪里改}：一个 adapter 文件，加 \code{tts\_adapters/\_\_init\_\_.py} 的一行 import；不改 \code{serving\_speech.py}。
+  \item \kw{纯 diffusion 的 TTS}也走 adapter：OmniVoice 继承 \code{DiffusionTTSAdapter}。
+  \item \kw{流式}：full-payload 与 async-chunk 两条路径都要测。
+\end{itemize}
+\vspace{4pt}
+\memo{历史样例：Breeze-TTS-2（两 stage）。单 stage 的 Kokoro-82M 已于 11-16 移除，提交仍在历史中。}
+\takeaway{TTS 的 endpoint 是小增量，但不替代模型自身的 stage、decoder 与流式实现。}
+\end{frame}
+
+\begin{frame}[t]{vLLM-Omni：diffusion 是完整的模型后端工作}
+\small
+\begin{itemize}
+  \item \kw{要移植的}：transformer 与 pipeline；去掉 Diffusers mixin，换成 Omni 的 attention 与 config。
+  \item \kw{注册}：在 \code{\_DIFFUSION\_MODELS} 里登记 (folder, file, class)。
+  \item \kw{pre / post process}：可选。指南写成必需，代码里是可选的。
+  \item \kw{必测}：L4 functionality，并加 \code{test\_alignment.py} 的对齐门；与 Diffusers 的对照是手动 PR 项。
+  \item \kw{独立扩展}：TP / CFG / SP、step execution、streaming、cache、offload，不算“基础跑通”。
+\end{itemize}
+\vspace{4pt}
+\memo{所列三个 diffusion 提交（Krea 2、Flux3 base、Stable Audio 3）都没有 stage processor 和 deploy YAML；并非所有 diffusion 提交都如此。}
+\takeaway{新 diffusion port 通常是完整模型后端的工作，不能按 TTS 的小增量估计。}
+\end{frame}
+
+\begin{frame}[t]{节点、walk、stage：两边的执行单位粒度不同}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.16}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.0cm} Y Y}
+\toprule
+\rowcolor{Mist}
+层次 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+最小执行单元 & 节点（\code{NodeSubmodule}）：一个 \code{torch.nn.Module}，对应图中的一个节点，在同一运行时内执行 & 模型类的 \code{forward}，由 vLLM 引擎在某个 stage 内调度 \\
+运行单位 & walk：一次请求沿图走的一条路径，如 \code{prefill\_text}、\code{prefill\_vit}、去噪循环 & stage：独立的引擎实例，有自己的设备、并行度与显存预算 \\
+循环 & \code{Loop} 由图声明；循环上限由 \code{get\_loop\_caps} 给出，停止由 \code{check\_stop} 判断 & 去噪或解码的循环在 stage 内部完成；stage 之间由 \code{input\_sources} 连接（BAGEL 为 0 → 1） \\
+跨单元交接 & 同一图内是张量边；跨工作进程由通信协议搬运 & stage 之间经 processor 与 connector 交接 \\
+部署归属 & \code{node\_groups} 把节点组放到 rank 上，节点组可跨多个 rank（分片） & \code{devices} 把 stage 放到卡上；一个 stage 也可以占多张卡（TP、CFG 并行） \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{两边没有一对一的对应。M* 的节点与 walk 位于同一运行时内；vLLM-Omni 的 stage 是独立引擎，其内部计算不以节点表示。比较时对齐职责，不对齐名字。}
+\takeaway{M* 的图在节点层面可见，vLLM-Omni 的流水线在 stage 层面可见。两边的 BAGEL 实现分别落在这两层上。}
+\end{frame}
+
+\begin{frame}[t]{同一个模型在两边的落地：BAGEL}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.14}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+ & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni（two-stage）} \\
+\midrule
+结构 & 7 个节点，按 walk 组织：\code{prefill\_text}（\code{LLM}）、\code{prefill\_vit}（\code{vit\_encoder} → \code{LLM}）、\code{prefill\_vae}（\code{vae\_encoder} → \code{LLM}）、去噪循环与 \code{vae\_decoder} & 2 个 stage：Thinker（\code{LLM\_AR}，拥有 tokenizer）→ DiT（\code{DIFFUSION}，\code{input\_sources = (0,)}） \\
+视觉与 VAE 的位置 & ViT、VAE 节点与 rank 0 上的 LLM 同卡 & ViT 在 Thinker 内；VAE 在 DiT stage 内 \\
+CFG 的表达 & 图节点 \code{LLM\_cfg\_text}、\code{LLM\_cfg\_img}，由 \code{combine\_cfg} 合并；CFG 并行时两个分支放在 rank 1 & 附加请求：\code{expand\_cfg\_prompts} 生成 cfg\_text 的请求；DiT 侧 \code{collect\_cfg\_kv\_caches} 收齐各路 KV \\
+跨卡交接 & 张量边；CFG 并行每步同步一次（一张图约 50 次） & KV 经 connector 从 Thinker 发给 DiT（\code{need\_send\_cache}、\code{need\_recv\_cache}） \\
+配置文件 & \code{configs/mstar/bagel\_cfgpar\_2gpu.yaml}：\code{node\_groups} 把节点放到 rank 0、1 & \code{configs/vllm\_omni/bagel\_two\_stage\_2gpu.yaml}：\code{stages} 与 \code{connectors} \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{M* 的 walk 与节点见 \code{mstar/model/bagel/bagel\_model.py}；vLLM-Omni 的拓扑见 \code{vllm\_omni/model\_executor/models/bagel/pipeline.py}。}
+\takeaway{同一个模型，两边都要解决 ViT、VAE、CFG 的放置与交接。差别在于 M* 把它们写进图，vLLM-Omni 把它们拆成 stage 与 processor。}
+\end{frame}
+
+\begin{frame}[t]{同一接入范围下，两个框架的投入是条件性的}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.14}
+\setlength{\tabcolsep}{2.8pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.0cm} Y Y}
+\toprule
+\rowcolor{Mist}
+接入层级 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+L0 新 checkpoint & 低：注册、YAML、文档、门禁。 & 低：deploy YAML、pipeline 别名、recipe。 \\
+L1 新模型类，底层 AR 已有 & 中：Model 与 NodeSubmodule；scaffold 可套用时偏低。 & 中：pipeline、stage processor、deploy；复用 vLLM 类。 \\
+L2 新 AR 架构 & 高：模型实现；缺资源或 kernel 时进入 runtime。 & 很高：core 模型、Omni 注册、HF config 注册、pipeline。 \\
+L3 多阶段 / 流式 TTS & 高：partition、stream edge、chunk、stop。 & 高：stage 与 chunk 契约、adapter、流式验收。 \\
+L3 diffusion / 循环 & 中到高（scaffold 可套用时）；否则高。 & 高到很高：transformer 与 pipeline 移植，L4 与对齐门。 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{“低 / 中 / 高”只表示实现面、跨层注册和验证范围，不是人天。两家没有同一模型的开发记录，所以不做工时对比，也不做总排名。}
+\takeaway{没有无条件“最省”的框架：底层 core 的复用度、执行形状与验收范围共同决定总投入。}
+\end{frame}
+
+\begin{frame}[t]{每家最容易花时间的地方}
+\small
+\begin{columns}[T,onlytextwidth]
+  \column{.48\textwidth}
+  \textbf{M*}
+  \begin{itemize}
+    \item 把模型画成图，并声明每个请求的状态。
+    \item loop、流式 partition 与 stop 的组合。
+    \item 形状不匹配 scaffold 时，要改 runtime。
+  \end{itemize}
+  \column{.48\textwidth}
+  \textbf{vLLM-Omni}
+  \begin{itemize}
+    \item stage 之间的数据交接（processor 与 connector）。
+    \item 新 AR 架构时，core 模型要自己实现。
+    \item diffusion 的 transformer 移植与对齐测试。
+  \end{itemize}
+\end{columns}
+\takeaway{每个框架的难点不同。计划接入时，先用这一页确认你的模型会落在哪个难点上。}
+\end{frame}
+
+\begin{frame}[t]{“接入完成”的验收门，按框架对应的测试}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.16}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.6cm} Y Y}
+\toprule
+\rowcolor{Mist}
+验收门 & \textcolor{Teal}{M*} & \textcolor{Orange}{vLLM-Omni} \\
+\midrule
+发现与配置 & \code{test/\allowbreak{}modular/\allowbreak{}test\_model\_registration.py}：注册、默认配置、docs 行、HF\_MODELS & 模型注册与 pipeline 解析测试 \\
+组件正确性 & \code{test/modular/} CPU 测试：graph、worker、资源生命周期 & 模型加载、权重映射、processor 序列化 \\
+执行路径 & \code{test\_model\_contracts.py}：\code{request\_kwargs} 覆写 & 每个 stage 的输入输出与 modality \\
+服务与流式 & GPU 集成测试；真实 \code{mstar-serve} 请求 & L4 functionality；TTS adapter 测试；diffusion 对齐门 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{路径以各 checkout 为准。并发与取消的状态隔离，两家都需要单独的测试；指南中的覆盖并不完整。}
+\takeaway{“服务能启动”或单次输出正常都不算通过。每一道门都要有可复现的测试入口。}
+\end{frame}
+
+\begin{frame}[t]{接入时的五类常见问题}
+\small
+\begin{enumerate}
+  \item \kw{只加权重，不加注册和文档。}服务能起，用户找不到。M* 的 \code{docs/\allowbreak{}mintlify/\allowbreak{}} 副本没有测试检查。
+  \item \kw{照抄旧名。}M* 指南第 5 步还在用 CUDA graph 旧名，当前是 accelerator 名。
+  \item \kw{按指南改旧文件。}vLLM-Omni 指南末尾仍写要改 \code{serving\_speech.py}，当前应改 TTS adapter。
+  \item \kw{把 diffusion 当成 TTS 的变体。}diffusion 的 pre / post、L4 测试与对齐门都不同，指南对此写得不完整。
+  \item \kw{用行数估人力。}行数含测试、文档和共享层改动，不能直接换算成工时。
+\end{enumerate}
+\takeaway{每一类都可以对照两家 checkout 中的指南与源码核对。}
+\end{frame}
+
+\begin{frame}[t]{来源、版本与边界}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{1.8cm} p{3.4cm} Y}
+\toprule
+\rowcolor{Mist}
+框架 & \code{external\_latest} checkout & 指南与核对说明 \\
+\midrule
+M* & \code{main} / 2c8ffde8 / 11-15 & Adding a New Model，更新于 11-15；契约与 checkout 一致，第 5 步有过期名称。 \\
+vLLM-Omni & \code{main} / a36de509e / 11-21 & Omni 指南最后修改 615f97b9c（2026-09-06）；Diffusion 11-11、TTS 11-04 沿用旧记录，未在新 checkout 重核。 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+\memo{官网页面本次未能直接抓取（网络策略拦截）。指南内容取自各 checkout 的 docs/，即官网页面的构建源。历史投入来自 squash 提交的 \code{git show --numstat}。未运行测试、未安装依赖、未下载权重。}
+\takeaway{这些是最新 main 快照，用于接入流程的核对；性能结果仍以 pinned 版本与 run manifest 为准。}
+\end{frame}

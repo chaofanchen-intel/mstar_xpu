@@ -1,0 +1,21 @@
+# vLLM-Omni v0.32.0 BAGEL, single-stage topology: one diffusion stage owns the whole
+# model (LLM + ViT + VAE) and runs TP2 over two XPUs. Eager execution (enforce_eager),
+# matching M*'s official XPU config (accelerator_graph: false).
+#
+# @GPUS@ is replaced with the physical XPU ids by scripts/serve_omni.sh
+# (vLLM-Omni writes the stage's `devices` straight into ZE_AFFINITY_MASK).
+pipeline: bagel_single_stage
+async_chunk: false
+
+stages:
+  - stage_id: 0
+    max_num_batched_tokens: 32768
+    max_num_seqs: 1
+    max_model_len: 8192
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    tensor_parallel_size: 2
+    devices: "@GPUS@"
+    default_sampling_params:
+      seed: 52

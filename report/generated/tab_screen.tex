@@ -1,0 +1,16 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2T 64 token \\
+\midrule
+M* TP2 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & 12.946\,\textcolor{Muted}{(12.943--12.953)} & \textcolor{Muted}{3.75\textsuperscript{§}} \\
+TP2 + XPU graph（捕获失败→回退 eager） & \textcolor{Teal}{M*} & 12.964\,\textcolor{Muted}{(12.960--13.017)} & \textcolor{Muted}{3.79\textsuperscript{§}} \\
+M* CFG 并行 · compile 开 · 缓存开 · 无 graph & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{7.702\,\textcolor{Muted}{(7.688--7.707)}}}\,$\star$ & \textcolor{Muted}{2.58\textsuperscript{§}} \\
+CFG 并行 + XPU graph（显存耗尽，起不来） & \textcolor{Teal}{M*} & -- & -- \\
+\midrule
+Omni 单 stage TP2 · 无 graph & \textcolor{Orange}{Omni} & 17.060\,\textcolor{Muted}{(17.048--17.060)} & -- \\
+Omni 单 stage CFG 并行 · 无 compile & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{9.970\,\textcolor{Muted}{(9.949--9.974)}}}\,$\star$ & -- \\
+Omni two-stage · 缓存关 · eager & \textcolor{Orange}{Omni} & 17.941\,\textcolor{Muted}{(17.862--17.965)} & 1.881\,\textcolor{Muted}{(1.876--1.881)} \\
+Omni two-stage · 缓存关 · Thinker graph & \textcolor{Orange}{Omni} & 17.970\,\textcolor{Muted}{(17.939--17.971)} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.860\,\textcolor{Muted}{(1.856--1.860)}}}\,$\star$ \\
+\bottomrule
+\end{tabularx}

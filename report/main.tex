@@ -1,0 +1,31 @@
+% BAGEL 在 Intel Arc Pro B70 上的 M* 与 vLLM-Omni 对比：框架支持范围、模型接入工作量、本机实测（16:9 幻灯片）。
+% 版式、配色与宏沿用 share/omni_runtime_report_v2（common.tex / deck.tex）。
+% 数据：scripts/make_tex_tables.py 从 results/*/timings.csv 生成 generated/*.tex。编译：bash build.sh
+\PassOptionsToPackage{table}{xcolor}
+\documentclass[aspectratio=169,10pt]{beamer}
+
+\input{common}
+\input{deck}
+\input{generated/values}
+
+\title{M* 与 vLLM-Omni：支持范围、接入工作量与 Intel B70 实测}
+\date{2026-11-25}
+\hypersetup{pdftitle={M* 与 vLLM-Omni：支持范围、接入工作量与 Intel B70 实测}}
+
+\begin{document}
+
+\deckcover{M* 与 vLLM-Omni\\支持范围、接入工作量，以及 BAGEL 在 Intel Arc Pro B70 上的实测}%
+  {各自最优配置、等工作量、全部实测结果列出并标出最佳}%
+  {框架支持范围 · 模型接入工作量 · BAGEL-7B-MoT · 并行方式 / torch.compile / XPU graph / 两阶段 connector / 前缀缓存}%
+  {结果汇报\quad|\quad Intel Arc Pro B70 $\times$2（卡 1、2）\\版本：M* 2c8ffde8f · vLLM-Omni main a36de509e（vLLM 0.34.0+xpu）与 v0.32.0}
+
+\input{chapters/00_summary}
+\input{chapters/01_support}
+\input{chapters/02_integration}
+\input{chapters/03_bagel_setup}
+\input{chapters/04_bagel_results}
+\input{chapters/05_bagel_factors}
+\input{chapters/06_xpu_graph}
+\input{chapters/07_appendix}
+
+\end{document}

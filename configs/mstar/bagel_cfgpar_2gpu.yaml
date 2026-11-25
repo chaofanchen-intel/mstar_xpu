@@ -1,0 +1,40 @@
+# M* BAGEL on 2 XPUs without tensor parallelism: CFG-parallel. Each card holds the full LLM (TP1, ~26 GiB).
+#   rank 0: ViT/VAE, main LLM branch, CFG combine   (also serves text generation, single-GPU decode)
+#   rank 1: the guidance branches (cfg_text, cfg_img)
+# Derived from external/mstar/configs/bagel_cfg_parallel_2gpu.yaml; KV pool sized for a 32 GiB card.
+model: "bagel"
+model_kwargs:
+  accelerator_graph: false
+max_seq_len: 8192
+max_concurrent_requests: 1
+
+resources:
+  kv:
+    max_seq_len: 8192
+    page_size: 64
+    max_num_pages: 384
+  attn:
+    backend: "xpu_paged"
+
+node_groups:
+  - node_names:
+      - vit_encoder
+      - vae_encoder
+      - vae_decoder
+    ranks:
+      - 0
+
+  - node_names:
+      - LLM
+      - combine_cfg
+    ranks:
+      - 0
+
+  - node_names:
+      - LLM_cfg_text
+      - LLM_cfg_img
+    ranks:
+      - 1
+    graph_walks:
+      - image_gen_cfg2
+      - image_gen_cfg3

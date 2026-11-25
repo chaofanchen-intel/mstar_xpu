@@ -1,0 +1,77 @@
+% BAGEL 两卡实测结果：全部结果矩阵、最优配置对比、等量比较、首请求
+\setpart{BAGEL 实测 · 两卡结果}
+
+\begin{frame}[t]{两卡全部实测结果：卡 1、2，稳态中位数，秒}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_final}
+\vspace{3pt}
+\begin{itemize}\scriptsize\setlength\itemsep{0pt}
+  \item 配置列即该行的完整定义，见第 3 部分。$\star$ = 同一框架内该 case 的最佳（1\% 以内并列）。n = 5，min--max 见附录 A。
+  \item 图生文两边输入规模一致（M* 1369 patch，Omni 1386 token）；图像编辑两边指令相同。--：未测或不支持；\textsuperscript{†}灰图，只保留耗时。
+\end{itemize}
+\takeaway{M* 最优：文生图 \val{final/mstar-cfgpar/t2i} s，图像编辑 \val{final/mstar-cfgpar/i2i} s。vLLM-Omni 最优：文生图 \val{final/omni-single-cfgpar2/t2i} s，图生文 \val{fact/omni-two-stage-prefixcache/i2t1} s（1 token）/ \val{fact/omni-two-stage-prefixcache/i2t64} s（64 token，缓存开）。}
+\end{frame}
+
+\newcommand{\barpair}[6]{% y, label, mstar value, omni value, mstar tag, omni tag
+    \pgfmathsetmacro{\mx}{max(#3,#4)}
+    \pgfmathsetmacro{\wm}{#3/\mx*6.6}
+    \pgfmathsetmacro{\wo}{#4/\mx*6.6}
+    \node[anchor=east,text width=3.6cm,align=right,font=\scriptsize\bfseries] at (3.7,#1-0.34) {#2};
+    \fill[Teal] (3.9,#1-0.04) rectangle ++(\wm,-0.28);
+    \node[anchor=west,font=\tiny] at (3.95+\wm,#1-0.18) {#3\,s\ \textcolor{Muted}{#5}};
+    \fill[Orange] (3.9,#1-0.36) rectangle ++(\wo,-0.28);
+    \node[anchor=west,font=\tiny] at (3.95+\wo,#1-0.50) {#4\,s\ \textcolor{Muted}{#6}};}
+
+\begin{frame}[t]{各 case 的最优配置对比（柱长按 case 内较大值归一）}
+\begin{tikzpicture}[x=1cm,y=.72cm,font=\scriptsize]
+  \fill[Teal] (3.9,.85) rectangle ++(.3,-.25); \node[anchor=west,font=\scriptsize] at (4.3,.72) {M*（CFG 并行，compile 开）};
+  \fill[Orange] (8.2,.85) rectangle ++(.3,-.25); \node[anchor=west,font=\scriptsize] at (8.6,.72) {vLLM-Omni};
+  \barpair{0}{文生图 T2I}{\raw{final/mstar-cfgpar/t2i}}{\raw{final/omni-single-cfgpar2/t2i}}{CFG 并行}{单 stage CFG 并行}
+  \barpair{-1.0}{图像编辑 I2I}{\raw{final/mstar-cfgpar/i2i}}{\raw{final/omni-single-tp2/i2i}}{CFG 并行}{单 stage TP2}
+  \barpair{-2.0}{图生文 1 token，缓存关}{\raw{fact/mstar-cfgpar-nocache/i2t1}}{\raw{final/omni-two-stage/i2t1}}{CFG 并行}{two-stage，eager}
+  \barpair{-3.0}{图生文 1 token，缓存开}{\raw{final/mstar-cfgpar/i2t1}}{\raw{fact/omni-two-stage-prefixcache/i2t1}}{}{two-stage + 前缀缓存}
+  \barpair{-4.0}{图生文 64 token，缓存关}{\raw{fact/mstar-cfgpar-nocache/i2t64}}{\raw{final/omni-two-stage/i2t64}}{CFG 并行}{two-stage，eager}
+  \barpair{-5.0}{图生文 64 token，缓存开}{\raw{final/mstar-cfgpar/i2t64}}{\raw{fact/omni-two-stage-prefixcache/i2t64}}{}{two-stage + 前缀缓存}
+\end{tikzpicture}
+\takeaway{vLLM-Omni 相对 M* 的耗时：文生图为 \pct{bestTti}，图像编辑为 \pct{bestIti}。图生文 1 token 为 \pct{i2tOff1}（缓存关）、\pct{i2tOn1}（缓存开）；64 token 为 \pct{i2tOff64}、\pct{i2tOn64}。}
+\end{frame}
+
+\begin{frame}[t]{图生文：输入与缓存设置对齐后的结果}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_parity}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item vLLM-Omni two-stage 的图生文请求返回 \code{usage.prompt\_tokens = 1386}（1369 个图像 patch + 17 个文本 token）。M* 的 \code{vit\_patches(512, 512, "default")} 同为 1369。
+  \item 早期测试的 M* 图生文使用了 4900 patch（\code{image\_preprocess:"vllm"}），与 vLLM-Omni main 的 1386 token 不等量，标 \textsuperscript{§}，仅供参考。
+  \item 灰色 = 早期的 4900 patch 数据；粗体 = 输入对齐后的数据（\code{results/20261122\_i2t\_parity}）。1 token 延迟降低 56--66\%，64 token 降低 4--17\%。
+\end{itemize}
+\takeaway{对齐后，M* 的 1 token 延迟为 0.085 s（缓存开）、0.293 s（缓存关）；vLLM-Omni 为 0.053 s、0.193 s。两种设置下 vLLM-Omni 都更快。}
+\end{frame}
+
+\begin{frame}[t]{图像编辑：同一指令、同一图像 token 量}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.08}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_i2i_parity}
+\vspace{2pt}
+\begin{itemize}\scriptsize\setlength\itemsep{0pt}
+  \item 上半部分：两边同一指令 \code{Replace the bagel with a croissant.}，ViT 1369 patch，VAE 1024 latent，输出均为可颂。
+  \item 下半部分：早期“加猫”指令，仅作记录。M* 默认预处理下未生效，故改用上述指令。
+  \item Omni 放大到 980$^2$：VAE 为 3721 latent，不等量，不用于比较。
+\end{itemize}
+\takeaway{等量后 M* CFG 并行仍快约 40\%：\val{final/mstar-cfgpar/i2i} s，vLLM-Omni 为 \val{final/omni-single-tp2/i2i} s。}
+\end{frame}
+
+\begin{frame}[t]{首个请求（含 JIT、编译、图捕获）的延迟，秒}
+\scriptsize\def\codesize{\relax}
+\renewcommand{\arraystretch}{1.12}\setlength{\tabcolsep}{3pt}
+\input{generated/tab_warm}
+\vspace{4pt}
+\begin{itemize}\scriptsize\setlength\itemsep{1pt}
+  \item 首请求指服务启动后，该 case 的第一次请求（warmup 1）。第二次 warmup 与稳态已无明显差异。M* 的图生文行来自单独的等量运行；vLLM-Omni 的两行同理。
+  \item M* 默认开启 \code{torch.compile}：T2I、I2I、I2T 的首请求均多出约 6--7 s。关闭后首请求更短，但扩散稳态慢 7--9\%。
+  \item vLLM-Omni 无 compile，首请求只多出内核懒加载的时间。单 stage CFG 并行的首个 T2I 比稳态多约 1 s。
+\end{itemize}
+\takeaway{需要冷启动即时响应的场景中，M* 的 compile 会使第一个请求多等约 6--7 s。稳态服务中该开销可以忽略。}
+\end{frame}

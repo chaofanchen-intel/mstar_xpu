@@ -1,0 +1,30 @@
+# Local Python environments and model weights
+/envs/*
+!/envs/README.md
+!/envs/requirements-vjepa-meta-native.txt
+!/envs/setup.sh
+/.venv/
+/models
+
+# Vendored source checkouts are recorded in external/SOURCE-RECORD.md
+/external/*
+!/external/SOURCE-RECORD.md
+
+# Latest upstream snapshots are recorded in external_latest/README.md
+/external_latest/*
+!/external_latest/README.md
+
+/agents_results/*
+
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+/results/*

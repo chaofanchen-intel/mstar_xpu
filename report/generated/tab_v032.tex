@@ -1,0 +1,11 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.9cm} p{0.9cm} Y Y Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & 框架 & T2I 512²·50 步 & I2T 1 token & I2T 64 token & I2I 512²·50 步 \\
+\midrule
+TP2，compile 开（默认） & \textcolor{Teal}{M*} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{12.954\,\textcolor{Muted}{(12.944--12.959)}}}\,$\star$ & \textcolor{Muted}{0.96\textsuperscript{§}} & \textcolor{Muted}{3.75\textsuperscript{§}} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{22.817\,\textcolor{Muted}{(22.802--22.819)}}}\,$\star$ \\
+TP2，compile 关（hook） & \textcolor{Teal}{M*} & 13.905\,\textcolor{Muted}{(13.901--13.915)} & \textcolor{Muted}{0.95\textsuperscript{§}} & \textcolor{Muted}{3.04\textsuperscript{§}} & 24.666\,\textcolor{Muted}{(24.662--24.670)} \\
+单 stage TP2 & \textcolor{Orange}{Omni} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{17.656\,\textcolor{Muted}{(17.653--17.659)}}}\,$\star$ & \textcolor{Muted}{描述不正确\textsuperscript{†}} & \textcolor{Muted}{描述不正确\textsuperscript{†}} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{30.740\,\textcolor{Muted}{(30.736--30.742)}}}\,$\star$ \\
+two-stage（Thinker 卡1 + DiT 卡2） & \textcolor{Orange}{Omni} & 18.528\,\textcolor{Muted}{(18.411--18.558)} & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{1.523\,\textcolor{Muted}{(1.517--1.525)}}}\,$\star$ & \cellcolor{GoldBg}\textbf{\textcolor{Teal}{3.347\,\textcolor{Muted}{(3.338--3.349)}}}\,$\star$ & 40.125\,\textcolor{Muted}{(40.114--40.133)} \\
+\bottomrule
+\end{tabularx}

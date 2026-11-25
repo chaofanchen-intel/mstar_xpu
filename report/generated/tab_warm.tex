@@ -1,0 +1,16 @@
+\begin{tabularx}{\textwidth}{>{\bfseries}p{5.2cm} Y Y Y Y}
+\toprule
+\rowcolor{Mist}
+配置 & T2I & I2T 1 token & I2T 64 token & I2I \\
+\midrule
+M* CFG 并行 · compile 开 · 缓存开 · 无 graph & 17.5 & 8.4 & 3.5 & 34.9 \\
+M* CFG 并行 · compile 关（诊断）· 缓存开 & 10.9 & 1.6 & 2.2 & 22.0 \\
+M* TP2 · compile 开 · 缓存开 · 无 graph & 24.6 & 16.7 & 4.3 & 39.7 \\
+M* CFG 并行 · compile 开 · 缓存关 & -- & 6.7 & 3.6 & 32.3 \\
+Omni 单 stage CFG 并行 · 无 compile & 10.9 & -- & -- & -- \\
+Omni 单 stage TP2 · 无 graph & 17.7 & -- & -- & 29.5 \\
+Omni two-stage · 缓存关 · eager & 18.7 & 0.6 & 1.9 & -- \\
+Omni two-stage · 缓存关 · Thinker graph & -- & 0.4 & 1.9 & -- \\
+Omni two-stage · 缓存开 · eager & -- & 0.6 & 1.7 & -- \\
+\bottomrule
+\end{tabularx}

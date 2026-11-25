@@ -1,0 +1,30 @@
+# (KV prefix cache OFF) # M* BAGEL on 3 XPUs, official CFG-parallel layout (external/mstar/configs/bagel_cfg_parallel.yaml):
+#   rank 0: ViT/VAE, main LLM branch, CFG combine
+#   rank 1: cfg_text branch      rank 2: cfg_img branch (only the 3-branch image-edit case uses it)
+# accelerator_graph: true. KV pool kept small (192 pages) so graph capture has room on a 32 GiB card.
+model: "bagel"
+model_kwargs:
+  accelerator_graph: true
+max_seq_len: 8192
+max_concurrent_requests: 1
+
+resources:
+  kv:
+    max_seq_len: 8192
+    page_size: 64
+    max_num_pages: 192
+    prefix_cache: false
+  attn:
+    backend: "xpu_paged"
+
+node_groups:
+  - node_names: [vit_encoder, vae_encoder, vae_decoder]
+    ranks: [0]
+  - node_names: [LLM, combine_cfg]
+    ranks: [0]
+  - node_names: [LLM_cfg_text]
+    ranks: [1]
+    graph_walks: [image_gen_cfg2, image_gen_cfg3]
+  - node_names: [LLM_cfg_img]
+    ranks: [2]
+    graph_walks: [image_gen_cfg3]
