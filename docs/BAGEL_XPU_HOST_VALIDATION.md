@@ -22,7 +22,7 @@
 | PCI BDF | `0000:18:00.0`、`0000:54:00.0`、`0000:cc:00.0` |
 | 主机内存 | 251.3 GiB；验证前可用约 243.6 GiB，推理后约 229.4 GiB |
 | Swap | 8 GiB；推理期间仍全部空闲 |
-| 模型快照 | `models/cache/models--ByteDance-Seed--BAGEL-7B-MoT/snapshots/5019f57d168e5816e8f3f701b17cc816bb7cf24b` |
+| 模型快照 | `~/workspaces/models/cache/models--ByteDance-Seed--BAGEL-7B-MoT/snapshots/5019f57d168e5816e8f3f701b17cc816bb7cf24b` |
 | `ema.safetensors` | 29,214,685,336 bytes，约 27.21 GiB |
 | `ae.safetensors` | 335,304,388 bytes，约 0.312 GiB |
 | LLM BF16 权重 | safetensors 元数据约 26.341 GiB；TP2 后每个 LLM rank 约 13.17 GiB |
@@ -101,7 +101,7 @@ MAMBA_ROOT_PREFIX=~/workspaces/.mamba ~/workspaces/.local/bin/micromamba create 
 
 ```bash
 cd ~/workspaces/mstar_xpu/external/mstar
-sg render -c 'PATH=/home/chaofan/workspaces/.native/ffmpeg/bin:$PATH LD_LIBRARY_PATH=/home/chaofan/workspaces/.native/ffmpeg/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} HF_HUB_OFFLINE=1 ~/workspaces/mstar_xpu/.venv/bin/mstar serve bagel --config ~/workspaces/mstar_xpu/external/mstar/configs/bagel_xpu_tp2.yaml --cache-dir ~/workspaces/mstar_xpu/models/cache --host 127.0.0.1 --port 18765 -O0 --log-level INFO'
+sg render -c 'PATH=/home/chaofan/workspaces/.native/ffmpeg/bin:$PATH LD_LIBRARY_PATH=/home/chaofan/workspaces/.native/ffmpeg/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} HF_HUB_OFFLINE=1 ~/workspaces/mstar_xpu/.venv/bin/mstar serve bagel --config ~/workspaces/mstar_xpu/external/mstar/configs/bagel_xpu_tp2.yaml --cache-dir ~/workspaces/models/cache --host 127.0.0.1 --port 18765 -O0 --log-level INFO'
 ```
 
 服务就绪后，可在另一个终端运行仓库的图像理解脚本：

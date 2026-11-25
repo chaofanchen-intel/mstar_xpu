@@ -3,13 +3,14 @@
 # Usage: source scripts/env.sh
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export WS
+export MODEL_ROOT="${MODEL_ROOT:-$HOME/workspaces/models}"
 export MSTAR_VENV="$WS/.venv"
 export OMNI_VENV="${OMNI_VENV:-$HOME/workspaces/.venvs/vllm-omni-main}"   # vLLM 0.34.0+xpu + vllm-omni main; old env: vllm-omni-v0.32.0
 export FFMPEG_HOME="${FFMPEG_HOME:-$HOME/workspaces/.native/ffmpeg}"
 export MODEL_ID="ByteDance-Seed/BAGEL-7B-MoT"
 
 export HF_HUB_OFFLINE=1
-export HF_HUB_CACHE="$WS/models/cache"
+export HF_HUB_CACHE="$MODEL_ROOT/cache"
 
 # --- OpenCL / oneDNN fix --------------------------------------------------------------
 # $FFMPEG_HOME/lib (a conda env) ships its own libOpenCL.so.1 (conda `ocl-icd`). With that

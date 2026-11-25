@@ -30,6 +30,7 @@ import base64
 import io
 import csv
 import json
+import os
 import statistics
 import struct
 import sys
@@ -41,7 +42,11 @@ import requests
 WS = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGE = WS / "assets" / "bagel_input_512.png"
 MODEL_ID = "ByteDance-Seed/BAGEL-7B-MoT"
-TOKENIZER_DIR_GLOB = "models/cache/models--ByteDance-Seed--BAGEL-7B-MoT/snapshots/*"
+TOKENIZER_SNAPSHOT_DIR = (
+    Path(os.environ.get("HF_HUB_CACHE", Path.home() / "workspaces" / "models" / "cache"))
+    / "models--ByteDance-Seed--BAGEL-7B-MoT"
+    / "snapshots"
+)
 
 T2I_PROMPT = "A red ceramic cup on a white table"
 I2I_PROMPT = "Add a small cat sitting beside the bagel on the plate."
@@ -208,7 +213,7 @@ def count_tokens(text: str) -> int | None:
     try:
         if _tok is None:
             from transformers import AutoTokenizer
-            snap = next(WS.glob(TOKENIZER_DIR_GLOB))
+            snap = next(TOKENIZER_SNAPSHOT_DIR.glob("*"))
             _tok = AutoTokenizer.from_pretrained(str(snap), local_files_only=True)
         return len(_tok.encode(text, add_special_tokens=False))
     except Exception:

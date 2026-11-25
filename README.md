@@ -32,7 +32,7 @@ mstar_xpu/
 │   ├── 20261122_rerun/<label>/    same-default-config rerun (vLLM-Omni 0.32.0)  timings.csv, manifest.json, sample outputs, server.log, gpu_timeline.csv, effective_config.yaml
 │   └── archive/20261118_initial/   first-pass data, configs and report (superseded, kept for reference)
 ├── external/{mstar,vllm-omni}   upstream checkouts (unmodified)
-├── models/cache                 HF cache (BAGEL-7B-MoT)
+├── models -> ../models          compatibility symlink; canonical cache: ~/workspaces/models/cache
 └── .venv                        M* environment  (vLLM-Omni envs: ~/workspaces/.venvs/vllm-omni-main = vLLM 0.34 [default], vllm-omni-v0.32.0 = old)
 ```
 
